@@ -2,10 +2,15 @@ import sys
 import hashlib
 import vt
 import os
+import time
+
 
 client_api_key="PLACE_YOUR_VIRUSTOTAL_API_KEY_HERE"
 
 if(sys.argv.__len__()==0): raise Exception("UnsupportedArgumentsException")
+
+global WAIT_TIME_SCAN
+WAIT_TIME_SCAN=30
 
 
 def HashFileMD5(file : str) -> str:
@@ -25,33 +30,42 @@ def HashFileMD5(file : str) -> str:
             md5.update(data)
     return md5.hexdigest()
 
-
-def getCandidateFiles(dir : str, extension : str | None) -> list: 
+def getCandidateFiles(dir : str, extensionstr : str | None) -> list: 
     #Normalizes extension format
-    if extension != None:
-        extension=extension.strip()
-        if(extension[0]=='.'):
-            extension=extension[1:]
-            print(extension)
-        
-    #List files and filters by extension
-    files = os.listdir(dir)
-    if(extension!=None):
-        candidates=[f for f in files if f.endswith("."+extension)]
-        return candidates
-    else: 
+    allFiles = os.listdir(dir)
+    if extensionstr != None: 
+        files=[]
+        extensionlist=extensionstr.split(",") #Split input extensions
+        for extension in extensionlist:
+            extension=extension.strip()
+            if(extension!=None):
+                if(extension[0]=='.'): extension=extension[1:] #Normalize extension handling
+                
+                candidates=[f for f in allFiles if f.endswith("."+extension)]
+                for f in candidates : files.append(f) #Append all candidates to ouput files
+                
         return files
+    else: #If no extension is given, return every file in dir
+        return allFiles
 
 def getUserVerification(files : list): 
     if(files==[]):
         print("No files found in directory, aborting")
         exit(1)
         
+     #We create a dict by extension, just to show the files in a more orderly fashion
+    fileMap={}
     print("The following files will be uploaded for verification: ")
-    for f in files: 
-        print (f)
+    for f in files:
+        extension="."+f.split(".")[-1]
+        fileMap.setdefault(extension, []).append(f)
+    for key in fileMap.keys():
+        print(key+": ")
+        for f in fileMap[key]:
+            print('\t'+f)
+            
     while(1):    
-        userVerification=input("Want to proceed? yes/no \n").lower()
+        userVerification=input("\nWant to proceed? (yes/no) \n").lower()
         if(userVerification=="no" or userVerification=="n"):
             exit(1)
         elif(userVerification=="yes" or userVerification=="y"):
@@ -60,19 +74,13 @@ def getUserVerification(files : list):
             print("Unvalid option")
         
 def argumentHandler():
-    
-    global DIRECTORY_PATH
+
+    global DIRECTORY_PATH,extension, only_print_unsafe,full_report
     DIRECTORY_PATH=None
-    
-    global extension
     extension=None
-    
-    global only_print_unsafe
     only_print_unsafe=False
-    
-    global full_report
     full_report=False
-    
+
     sys.argv.pop(0) #Pop scripts name
     
     if(sys.argv.__len__()==0): exit("Program usage: python vtbu.py [-e {extension} | other_arguments] PATH_TO_FILE")
@@ -91,7 +99,7 @@ def argumentHandler():
                 extension=sys.argv[1]
                 sys.argv.pop(0)
                 
-            elif argument=="-u" or argument=="--only-unsafe": only_print_unsafe=True
+            elif argument=="-u" or argument=="--unsafe-only": only_print_unsafe=True
             elif argument=="-f" or argument=="--full-report": full_report=True     
             else: exit("Invalid argument: "+argument) 
             
@@ -111,20 +119,41 @@ def getFileAnalysis(file : str) -> vt.Object:
         #print(file)
         #print(MD5_File_Hash)
         MD5_File_Hash=HashFileMD5(DIRECTORY_PATH+"/"+file)
-        analysis=client.get_object("/files/"+MD5_File_Hash).last_analysis_stats
+        #analysis=client.get_object("/files/"+MD5_File_Hash).last_analysis_stats
+        analysis=client.get_object("/files/"+MD5_File_Hash)
+        return analysis
+    
+    except vt.error.APIError as e:
+        if e.args[0]=="NotFoundError":
+            return scanFile(file)
+        else: 
+            client.close()
+            print("API Error: " + str(e))
+            raise
+    
+def scanFile(f : str) -> vt.Object:
+    #Scans the file
+    print("SCANNING: "+f)
+    
+    try:
+        PATH_TO_FILE=DIRECTORY_PATH+"/"+f
+        with open(PATH_TO_FILE, "rb") as f:
+            analysis = client.scan_file(f)
+        
+        while True:
+            analysis = client.get_object("/analyses/"+analysis.id)
+            print(analysis.status)
+            if analysis.status == "completed":
+                break
+            time.sleep(WAIT_TIME_SCAN)
         return analysis
     
     except vt.error.APIError as e:
         client.close()
-        print("API Error, Quota exceeded?: " + str(e))
+        print("API Error: " + str(e))
         raise
-    
-    
 
-            
 
-#analysis=client.get_object("/files/7b9c519fc7f5f6a49529adf436837e65").last_analysis_stats
-#files=[f for f in os.listdir(sys.argv[1]) if os.path.isfile(f)]
 
 argumentHandler()
 files=getCandidateFiles(DIRECTORY_PATH,extension)
@@ -142,27 +171,31 @@ try:
         undetected=0
         
         for file in files:
-            analysis=getFileAnalysis(file)
+            full_analysis=getFileAnalysis(file)
+            try:
+                analysis_stats=full_analysis.last_analysis_stats     #Fetch from /files/
+            except:
+                analysis_stats=full_analysis.stats                   #Fetch from /analyses/
             
             if not full_report:
-    
-                if(analysis["malicious"]!=0 or analysis["suspicious"]!=0):
+                #print(analysis.stats["malicious"])
+                if(analysis_stats["malicious"]!=0 or analysis_stats["suspicious"]!=0):
                     print(file+": ")
-                    if(analysis["malicious"]!=0):
+                    if(analysis_stats["malicious"]!=0):
                         malicious+=1
                         malicious_list.append(file)
-                        print("Malicious: "+str(analysis["malicious"]))
-                    if(analysis["suspicious"]!=0):
+                        print("Malicious: "+str(analysis_stats["malicious"]))
+                    if(analysis_stats["suspicious"]!=0):
                         suspicious+=1
                         suspicious_list.append(file)
-                        print("Suspicious: "+str(analysis["suspicious"]))          
+                        print("Suspicious: "+str(analysis_stats["suspicious"]))          
                               
                 else:
                     undetected+=1
                     if not only_print_unsafe: print(file+": Clean!")
             else:   #TO DO
                 print(file+": ")
-                print(analysis)
+                print(analysis_stats)
                 
             #PRINT SUMMARY
         print("------ SUMMARY ------")
