@@ -30,14 +30,21 @@ def HashFileMD5(file : str) -> str:
 
 
 
-def getFilesToScan(rootDir : str, extesion : str) -> list:
-    global DirectoryQueue
-    DirectoryQueue=Queue()
-    
-    DirectoryQueue.put(rootDir)
-    candidateFiles=getAllFilesInDirHyerarchy()
+def getFilesToScan(rootDir : str, extension : str) -> list:
+
+    candidateFiles=getAllFilesInDirHyerarchy(rootDir)
     return filterFilesByExtension(candidateFiles, extension)
 
+
+def getAllFilesInDirHyerarchy(rootDir : str) -> list : #RETURN RELATIVE_PATH OF ALL FILES IN FOLDER HYERARCHY
+    files_list = []
+    for root, dirs, files in os.walk(rootDir):
+        for file in files:
+            full_path = os.path.join(root, file)
+            files_list.append(full_path)
+    return files_list
+
+'''
 #RELATIVE PATH VERSION
 def getAllFilesInDirHyerarchy() -> list : #RETURN RELATIVE_PATH OF ALL FILES IN FOLDER HYERARCHY
     
@@ -56,7 +63,8 @@ def getAllFilesInDirHyerarchy() -> list : #RETURN RELATIVE_PATH OF ALL FILES IN 
         
     currentDir_Files_RELPATH.extend(getAllFilesInDirHyerarchy())
     return currentDir_Files_RELPATH
-                
+'''      
+     
 def filterFilesByExtension(candidateFiles_RELPATH : list, extensionstr : str) -> list:           #SHOULD BE CALLED ONCE 
     
     #If no extension provided, return all candidate files
@@ -136,15 +144,13 @@ def argumentHandler():
             if not os.path.isdir(DIRECTORY_PATH):
                 exit("Invalid directory path: "+argument)
                 
-            if DIRECTORY_PATH.endswith("/"):            # python vt-sbs myDir/ -> myDir
-                DIRECTORY_PATH=DIRECTORY_PATH[:-1]
+            #if DIRECTORY_PATH.endswith("/"):            # python vt-sbs myDir/ -> myDir
+                #DIRECTORY_PATH=DIRECTORY_PATH[:-1]
                 
             sys.argv.pop(0)
     if DIRECTORY_PATH==None:
         exit("Aborted: file path cant be None")
 
-           
-           
            
            
             
