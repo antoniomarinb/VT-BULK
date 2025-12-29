@@ -1,8 +1,5 @@
-import sys
-import hashlib
-import vt
-import os
-import time
+import sys, hashlib, vt, os, time
+from queue import Queue
 
 client_api_key=open("./vt_api_key.txt","r").read()
 
@@ -10,7 +7,6 @@ if(sys.argv.__len__()==0): raise Exception("UnsupportedArgumentsException")
 
 global WAIT_TIME_SCAN
 WAIT_TIME_SCAN=30
-
 
 def HashFileMD5(file : str) -> str:
     # Source - https://stackoverflow.com/questions/22058048/hashing-a-file-in-python
@@ -29,23 +25,51 @@ def HashFileMD5(file : str) -> str:
             md5.update(data)
     return md5.hexdigest()
 
-def getCandidateFiles(dir : str, extensionstr : str | None) -> list: 
-    #Normalizes extension format
-    allFiles = os.listdir(dir)
-    if extensionstr != None: 
-        files=[]
-        extensionlist=extensionstr.split(",") #Split input extensions
-        for extension in extensionlist:
-            extension=extension.strip()
-            if(extension!=None):
-                if(extension[0]=='.'): extension=extension[1:] #Normalize extension handling
+
+
+
+
+
+def getFilesToScan(rootDir : str, extesion : str) -> list:
+    global DirectoryQueue
+    DirectoryQueue=Queue()
+    
+    DirectoryQueue.put(rootDir)
+    candidateFiles=getAllFilesInDirHyerarchy()
+    return filterFilesByExtension(candidateFiles, extension)
+
+#RELATIVE PATH VERSION
+def getAllFilesInDirHyerarchy() -> list : #RETURN RELATIVE_PATH OF ALL FILES IN FOLDER HYERARCHY
+    
+    if(DirectoryQueue.empty()): return []#Return empty list, break recursivity
+    
+    currentDir=DirectoryQueue.get()  
+    
+    allDirFiles=os.listdir(currentDir)
+    currentDir_Files_RELPATH=[]
+    
+    for file in allDirFiles:
+        file_PATH=f"{currentDir}/{file}"
+        if os.path.isfile(file_PATH): currentDir_Files_RELPATH.append(file_PATH)
+        elif os.path.isdir(file_PATH): DirectoryQueue.put(file_PATH)                #If is directory, insert into the queue
+        
+        
+    currentDir_Files_RELPATH.extend(getAllFilesInDirHyerarchy())
+    return currentDir_Files_RELPATH
                 
-                candidates=[f for f in allFiles if f.endswith("."+extension)]
-                for f in candidates : files.append(f) #Append all candidates to ouput files
-                
-        return files
-    else: #If no extension is given, return every file in dir
-        return allFiles
+def filterFilesByExtension(candidateFiles_RELPATH : list, extensionstr : str) -> list:           #SHOULD BE CALLED ONCE 
+    
+    #If no extension provided, return all candidate files
+    if extensionstr == None or extensionstr.strip()=="":  return candidateFiles_RELPATH
+        
+    extensionset=set(extensionstr.split(","))                                           #Split input extensions
+    extensionset=[extension.strip().removeprefix('.') for extension in extensionset]    #Strip every extension and normalize format
+    output=[file for file in candidateFiles_RELPATH if file.split(".")[-1] in extensionset] #Return every file that matches with one of the extensions
+    return output
+
+
+
+
 
 def getUserVerification(files : list): 
     #PREREQUISITES
@@ -111,34 +135,41 @@ def argumentHandler():
             DIRECTORY_PATH=sys.argv[0]
             if not os.path.isdir(DIRECTORY_PATH):
                 exit("Invalid directory path: "+argument)
+                
+            if DIRECTORY_PATH.endswith("/"):            # python vt-sbs myDir/ -> myDir
+                DIRECTORY_PATH=DIRECTORY_PATH[:-1]
+                
             sys.argv.pop(0)
     if DIRECTORY_PATH==None:
         exit("Aborted: file path cant be None")
 
+           
+           
+           
+           
             
 def getFileAnalysis(file : str) -> vt.Object:
     try:
         #print(file)
         #print(MD5_File_Hash)
-        MD5_File_Hash=HashFileMD5(DIRECTORY_PATH+"/"+file)
+        MD5_File_Hash=HashFileMD5(file)
         analysis=client.get_object("/files/"+MD5_File_Hash)
         return analysis
     
     except vt.error.APIError as e:
         if e.args[0]=="NotFoundError":
-            return scanFile(file, client)
+            return scanFile(file)
         else: 
             client.close()
             print("API Error: " + str(e))
             raise
     
-def scanFile(f : str) -> vt.Object:
+def scanFile(file : str) -> vt.Object:
     #Scans the file
-    print("SCANNING: "+f)
+    print("SCANNING: "+file)
     
     try:
-        PATH_TO_FILE=DIRECTORY_PATH+"/"+f
-        with open(PATH_TO_FILE, "rb") as f:
+        with open(file, "rb") as f:
             analysis = client.scan_file(f)
         
         while True:
@@ -171,9 +202,9 @@ def ScanAndGetResults(files : list):
             for file in files:
                 full_analysis=getFileAnalysis(file)
                 try:
-                    analysis_stats=full_analysis.last_analysis_stats     #Fetched from /files/
+                    analysis_stats=full_analysis.last_analysis_stats     #Fetch from /files/
                 except:
-                    analysis_stats=full_analysis.stats                   #Fetched from /analyses/
+                    analysis_stats=full_analysis.stats                   #Fetch from /analyses/
                 
                 if not full_report:
                     #print(analysis.stats["malicious"])
@@ -217,7 +248,7 @@ def ScanAndGetResults(files : list):
         
 ######### MAIN #########
 argumentHandler()
-files=getCandidateFiles(DIRECTORY_PATH,extension)
+files=getFilesToScan(DIRECTORY_PATH,extension)
 getUserVerification(files)
 ScanAndGetResults(files)
 exit(0)
