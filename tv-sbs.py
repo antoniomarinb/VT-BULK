@@ -154,7 +154,7 @@ def scanFile(f : str) -> vt.Object:
         print("API Error: " + str(e))
         raise
 
-def getResults(files : list):
+def ScanAndGetResults(files : list):
     exit_code=0
     try:
         global client 
@@ -171,9 +171,9 @@ def getResults(files : list):
             for file in files:
                 full_analysis=getFileAnalysis(file)
                 try:
-                    analysis_stats=full_analysis.last_analysis_stats     #Fetch from /files/
+                    analysis_stats=full_analysis.last_analysis_stats     #Fetched from /files/
                 except:
-                    analysis_stats=full_analysis.stats                   #Fetch from /analyses/
+                    analysis_stats=full_analysis.stats                   #Fetched from /analyses/
                 
                 if not full_report:
                     #print(analysis.stats["malicious"])
@@ -219,5 +219,5 @@ def getResults(files : list):
 argumentHandler()
 files=getCandidateFiles(DIRECTORY_PATH,extension)
 getUserVerification(files)
-getResults(files)
+ScanAndGetResults(files)
 exit(0)
