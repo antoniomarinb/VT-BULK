@@ -4,8 +4,7 @@ import vt
 import os
 import time
 
-
-client_api_key="PLACE_YOUR_VIRUSTOTAL_API_KEY_HERE"
+client_api_key=open("./vt_api_key.txt","r").read()
 
 if(sys.argv.__len__()==0): raise Exception("UnsupportedArgumentsException")
 
@@ -49,11 +48,12 @@ def getCandidateFiles(dir : str, extensionstr : str | None) -> list:
         return allFiles
 
 def getUserVerification(files : list): 
+    #PREREQUISITES
     if(files==[]):
         print("No files found in directory, aborting")
         exit(1)
         
-     #We create a dict by extension, just to show the files in a more orderly fashion
+     #SHOW FILES BY EXTENSION
     fileMap={}
     print("The following files will be uploaded for verification: ")
     for f in files:
@@ -64,6 +64,7 @@ def getUserVerification(files : list):
         for f in fileMap[key]:
             print('\t'+f)
             
+    #ASK USER FOR FINAL VERIFICATION
     while(1):    
         userVerification=input("\nWant to proceed? (yes/no) \n").lower()
         if(userVerification=="no" or userVerification=="n"):
@@ -83,7 +84,7 @@ def argumentHandler():
 
     sys.argv.pop(0) #Pop scripts name
     
-    if(sys.argv.__len__()==0): exit("Program usage: python vtbu.py [-e {extension} | other_arguments] PATH_TO_FILE")
+    if(sys.argv.__len__()==0): exit("Program usage: python vtbu.py [-e {extension} | other_arguments] PATH_TO_DIR")
         
     while(sys.argv.__len__()!=0):
         argument=sys.argv[0]
@@ -113,19 +114,19 @@ def argumentHandler():
             sys.argv.pop(0)
     if DIRECTORY_PATH==None:
         exit("Aborted: file path cant be None")
+
             
 def getFileAnalysis(file : str) -> vt.Object:
     try:
         #print(file)
         #print(MD5_File_Hash)
         MD5_File_Hash=HashFileMD5(DIRECTORY_PATH+"/"+file)
-        #analysis=client.get_object("/files/"+MD5_File_Hash).last_analysis_stats
         analysis=client.get_object("/files/"+MD5_File_Hash)
         return analysis
     
     except vt.error.APIError as e:
         if e.args[0]=="NotFoundError":
-            return scanFile(file)
+            return scanFile(file, client)
         else: 
             client.close()
             print("API Error: " + str(e))
@@ -153,67 +154,70 @@ def scanFile(f : str) -> vt.Object:
         print("API Error: " + str(e))
         raise
 
+def getResults(files : list):
+    exit_code=0
+    try:
+        global client 
+        client = vt.Client(client_api_key)
+        try:
+            malicious=0
+            malicious_list=[]
+            
+            suspicious=0
+            suspicious_list=[]
+            
+            undetected=0
+            
+            for file in files:
+                full_analysis=getFileAnalysis(file)
+                try:
+                    analysis_stats=full_analysis.last_analysis_stats     #Fetch from /files/
+                except:
+                    analysis_stats=full_analysis.stats                   #Fetch from /analyses/
+                
+                if not full_report:
+                    #print(analysis.stats["malicious"])
+                    if(analysis_stats["malicious"]!=0 or analysis_stats["suspicious"]!=0):
+                        print(file+": ")
+                        if(analysis_stats["malicious"]!=0):
+                            malicious+=1
+                            malicious_list.append(file)
+                            print("Malicious: "+str(analysis_stats["malicious"]))
+                        if(analysis_stats["suspicious"]!=0):
+                            suspicious+=1
+                            suspicious_list.append(file)
+                            print("Suspicious: "+str(analysis_stats["suspicious"]))          
+                                
+                    else:
+                        undetected+=1
+                        if not only_print_unsafe: print(file+": Clean!")
+                else:   #TO DO
+                    print(file+": ")
+                    print(analysis_stats)
+                    
+                #PRINT SUMMARY
+            print("------ SUMMARY ------")
+            print("UNDETECTED: "+str(undetected))
+            print("SUSPICIOUS: "+str(suspicious))
+            if(suspicious>0): print(suspicious_list)
+            print("MALICIOUS: "+str(malicious))
+            if(malicious>0): print(malicious_list)
+                
+        except Exception as e: 
+            exit_code=1
+            print("Couldnt process file: "+file)
+            client.close()
+            exit(exit_code)
 
-
+    except Exception as e:
+        print(e)
+        exit_code=2
+    finally: 
+        client.close()
+        
+######### MAIN #########
 argumentHandler()
 files=getCandidateFiles(DIRECTORY_PATH,extension)
 getUserVerification(files)
-exit_code=0
-try:
-    client = vt.Client(client_api_key)
-    try:
-        malicious=0
-        malicious_list=[]
-        
-        suspicious=0
-        suspicious_list=[]
-        
-        undetected=0
-        
-        for file in files:
-            full_analysis=getFileAnalysis(file)
-            try:
-                analysis_stats=full_analysis.last_analysis_stats     #Fetch from /files/
-            except:
-                analysis_stats=full_analysis.stats                   #Fetch from /analyses/
-            
-            if not full_report:
-                #print(analysis.stats["malicious"])
-                if(analysis_stats["malicious"]!=0 or analysis_stats["suspicious"]!=0):
-                    print(file+": ")
-                    if(analysis_stats["malicious"]!=0):
-                        malicious+=1
-                        malicious_list.append(file)
-                        print("Malicious: "+str(analysis_stats["malicious"]))
-                    if(analysis_stats["suspicious"]!=0):
-                        suspicious+=1
-                        suspicious_list.append(file)
-                        print("Suspicious: "+str(analysis_stats["suspicious"]))          
-                              
-                else:
-                    undetected+=1
-                    if not only_print_unsafe: print(file+": Clean!")
-            else:   #TO DO
-                print(file+": ")
-                print(analysis_stats)
-                
-            #PRINT SUMMARY
-        print("------ SUMMARY ------")
-        print("UNDETECTED: "+str(undetected))
-        print("SUSPICIOUS: "+str(suspicious))
-        if(suspicious>0): print(suspicious_list)
-        print("MALICIOUS: "+str(malicious))
-        if(malicious>0): print(malicious_list)
-            
-    except Exception as e: 
-        exit_code=1
-        print("Couldnt process file: "+file)
-        client.close()
-        exit(exit_code)
-
-except Exception as e:
-    print(e)
-    exit_code=2
-finally: 
-    client.close()
-    exit(exit_code)
+getResults(files)
+exit(0)
