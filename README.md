@@ -11,10 +11,8 @@ CURRENT PROGRAM FUNCTIONALITY:
   - Send files for scanning to VirusTotal (and show results).
 
 TODO:
-  - Scan entire file depth, instead of superficial level. URGENT!!!!
   - Create detailed scan dump in a file.
   - Store file detection details in .json files.
   - Reduce the amount of API usage by not requesting recently scanned files.
-  - Add the ability to scan files, not just request info.
   - Maybe bulk scan URLs in a future?
   - UI in a far future.
