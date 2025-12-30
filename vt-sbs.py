@@ -5,6 +5,8 @@ client_api_key=open("vt_api_key.txt","r").read()
 
 global WAIT_TIME_SCAN
 WAIT_TIME_SCAN=30
+global PROGRAM_USAGE_STR
+PROGRAM_USAGE_STR="python vt-sbs.py [ | -e {extensions} | -u | --unsafe-only | -f | --full-report (NOT IMPLEMENTED)] PATH_TO_DIR"
 
 #FILE SCANNING FUNCTIONS
 def getFilesToScan(rootDir : str, extension : str) -> list:
@@ -93,7 +95,6 @@ def getUserVerification(files : list):
         else:
             print("Unvalid option")
 def argumentHandler():
-
     global DIRECTORY_PATH,extension, only_print_unsafe,full_report
     DIRECTORY_PATH=None
     extension=None
@@ -102,7 +103,10 @@ def argumentHandler():
 
     sys.argv.pop(0) #Pop scripts name
     
-    if(sys.argv.__len__()==0): exit("Program usage: python vtbu.py [-e {extension} | other_arguments] PATH_TO_DIR")
+    #if(sys.argv.__len__()==0): exit("Program usage: python vtbu.py [-e {extension} | other_arguments] PATH_TO_DIR")
+    if(sys.argv.__len__()==0): 
+        DIRECTORY_PATH,extension=LaunchSimpleGUI()
+        return
         
     while(sys.argv.__len__()!=0):
         argument=sys.argv[0]
@@ -120,7 +124,7 @@ def argumentHandler():
                 
             elif argument=="-u" or argument=="--unsafe-only": only_print_unsafe=True
             elif argument=="-f" or argument=="--full-report": full_report=True     
-            else: exit("Invalid argument: "+argument) 
+            else: exit("Invalid argument, : "+argument) 
             
             sys.argv.pop(0)
 
@@ -137,6 +141,7 @@ def argumentHandler():
     if DIRECTORY_PATH==None:
         exit("Aborted: file path cant be None")
 def HashFileMD5(file : str) -> str:
+
     # Source - https://stackoverflow.com/questions/22058048/hashing-a-file-in-python
     # Posted by Randall Hunt
     # Retrieved 2025-12-28, License - CC BY-SA 4.0
@@ -152,6 +157,13 @@ def HashFileMD5(file : str) -> str:
                 break
             md5.update(data)
     return md5.hexdigest()
+def LaunchSimpleTUI():
+    DIRECTORY_PATH = input("Choose file to scan: ")
+    print("Extensions to scan (leave blank to scan every extension)")
+    print("F.E: .dll, .exe")
+    extension=input()
+    return DIRECTORY_PATH,extension
+    
 
 #FILE ANALYSIS HANDLERS
 def ScanAndGetResults(files : list):
