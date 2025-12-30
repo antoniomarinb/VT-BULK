@@ -1,70 +1,23 @@
 import sys, hashlib, vt, os, time
 from queue import Queue
 
-client_api_key=open("./vt_api_key.txt","r").read()
-
-if(sys.argv.__len__()==0): raise Exception("UnsupportedArgumentsException")
+client_api_key=open("vt_api_key.txt","r").read()
 
 global WAIT_TIME_SCAN
 WAIT_TIME_SCAN=30
 
-def HashFileMD5(file : str) -> str:
-    # Source - https://stackoverflow.com/questions/22058048/hashing-a-file-in-python
-    # Posted by Randall Hunt
-    # Retrieved 2025-12-28, License - CC BY-SA 4.0
-    # BUF_SIZE is totally arbitrary, change for your app!
-    BUF_SIZE = 65536  # lets read stuff in 64kb chunks!
-
-    md5 = hashlib.md5()
-
-    with open(file, 'rb') as f:
-        while True:
-            data = f.read(BUF_SIZE)
-            if not data:
-                break
-            md5.update(data)
-    return md5.hexdigest()
-
-
-
-
-
-
+#FILE SCANNING FUNCTIONS
 def getFilesToScan(rootDir : str, extension : str) -> list:
 
     candidateFiles=getAllFilesInDirHyerarchy(rootDir)
     return filterFilesByExtension(candidateFiles, extension)
-
-
-def getAllFilesInDirHyerarchy(rootDir : str) -> list : #RETURN RELATIVE_PATH OF ALL FILES IN FOLDER HYERARCHY
+def getAllFilesInDirHyerarchy(rootDir : str) -> list : #RETURN RELATIVE_PATH OF ALL FILES IN FOLDER HYERARCHY 
     files_list = []
     for root, dirs, files in os.walk(rootDir):
         for file in files:
             full_path = os.path.join(root, file)
             files_list.append(full_path)
     return files_list
-
-'''
-#RELATIVE PATH VERSION
-def getAllFilesInDirHyerarchy() -> list : #RETURN RELATIVE_PATH OF ALL FILES IN FOLDER HYERARCHY
-    
-    if(DirectoryQueue.empty()): return []#Return empty list, break recursivity
-    
-    currentDir=DirectoryQueue.get()  
-    
-    allDirFiles=os.listdir(currentDir)
-    currentDir_Files_RELPATH=[]
-    
-    for file in allDirFiles:
-        file_PATH=f"{currentDir}/{file}"
-        if os.path.isfile(file_PATH): currentDir_Files_RELPATH.append(file_PATH)
-        elif os.path.isdir(file_PATH): DirectoryQueue.put(file_PATH)                #If is directory, insert into the queue
-        
-        
-    currentDir_Files_RELPATH.extend(getAllFilesInDirHyerarchy())
-    return currentDir_Files_RELPATH
-'''      
-     
 def filterFilesByExtension(candidateFiles_RELPATH : list, extensionstr : str) -> list:           #SHOULD BE CALLED ONCE 
     
     #If no extension provided, return all candidate files
@@ -75,10 +28,44 @@ def filterFilesByExtension(candidateFiles_RELPATH : list, extensionstr : str) ->
     output=[file for file in candidateFiles_RELPATH if file.split(".")[-1] in extensionset] #Return every file that matches with one of the extensions
     return output
 
+#FILE ANALYSIS FUNCTIONS     
+def getFileAnalysis(file : str) -> vt.Object:
+    try:
+        #print(file)
+        #print(MD5_File_Hash)
+        MD5_File_Hash=HashFileMD5(file)
+        analysis=client.get_object("/files/"+MD5_File_Hash)
+        return analysis
+    
+    except vt.error.APIError as e:
+        if e.args[0]=="NotFoundError":
+            return scanFile(file)
+        else: 
+            client.close()
+            print("API Error: " + str(e))
+            raise 
+def scanFile(file : str) -> vt.Object:
+    #Scans the file
+    print("SCANNING: "+file)
+    
+    try:
+        with open(file, "rb") as f:
+            analysis = client.scan_file(f)
+        
+        while True:
+            analysis = client.get_object("/analyses/"+analysis.id)
+            print(analysis.status)
+            if analysis.status == "completed":
+                break
+            time.sleep(WAIT_TIME_SCAN)
+        return analysis
+    
+    except vt.error.APIError as e:
+        client.close()
+        print("API Error: " + str(e))
+        raise
 
-
-
-
+#HELPER FUNCTIONS
 def getUserVerification(files : list): 
     #PREREQUISITES
     if(files==[]):
@@ -105,7 +92,6 @@ def getUserVerification(files : list):
             return
         else:
             print("Unvalid option")
-        
 def argumentHandler():
 
     global DIRECTORY_PATH,extension, only_print_unsafe,full_report
@@ -150,47 +136,24 @@ def argumentHandler():
             sys.argv.pop(0)
     if DIRECTORY_PATH==None:
         exit("Aborted: file path cant be None")
+def HashFileMD5(file : str) -> str:
+    # Source - https://stackoverflow.com/questions/22058048/hashing-a-file-in-python
+    # Posted by Randall Hunt
+    # Retrieved 2025-12-28, License - CC BY-SA 4.0
+    # BUF_SIZE is totally arbitrary, change for your app!
+    BUF_SIZE = 65536  # lets read stuff in 64kb chunks!
 
-           
-           
-            
-def getFileAnalysis(file : str) -> vt.Object:
-    try:
-        #print(file)
-        #print(MD5_File_Hash)
-        MD5_File_Hash=HashFileMD5(file)
-        analysis=client.get_object("/files/"+MD5_File_Hash)
-        return analysis
-    
-    except vt.error.APIError as e:
-        if e.args[0]=="NotFoundError":
-            return scanFile(file)
-        else: 
-            client.close()
-            print("API Error: " + str(e))
-            raise
-    
-def scanFile(file : str) -> vt.Object:
-    #Scans the file
-    print("SCANNING: "+file)
-    
-    try:
-        with open(file, "rb") as f:
-            analysis = client.scan_file(f)
-        
+    md5 = hashlib.md5()
+
+    with open(file, 'rb') as f:
         while True:
-            analysis = client.get_object("/analyses/"+analysis.id)
-            print(analysis.status)
-            if analysis.status == "completed":
+            data = f.read(BUF_SIZE)
+            if not data:
                 break
-            time.sleep(WAIT_TIME_SCAN)
-        return analysis
-    
-    except vt.error.APIError as e:
-        client.close()
-        print("API Error: " + str(e))
-        raise
+            md5.update(data)
+    return md5.hexdigest()
 
+#FILE ANALYSIS HANDLERS
 def ScanAndGetResults(files : list):
     exit_code=0
     try:
@@ -207,6 +170,7 @@ def ScanAndGetResults(files : list):
             
             for file in files:
                 full_analysis=getFileAnalysis(file)
+                print(full_analysis)
                 try:
                     analysis_stats=full_analysis.last_analysis_stats     #Fetch from /files/
                 except:
