@@ -1,4 +1,4 @@
-import sys, hashlib, vt, os, time
+import sys, hashlib, vt, os, time, requests, json
 from queue import Queue
 
 client_api_key=open("vt_api_key.txt","r").read()
@@ -8,6 +8,8 @@ global PROGRAM_USAGE_STR
 PROGRAM_USAGE_STR="python vt-sbs.py [ | -e {extensions} | -u | --unsafe-only | -f | --full-report (NOT IMPLEMENTED)] PATH_TO_DIR"
 global VERBOSE
 VERBOSE = True
+global NO_JSON_DUMP
+NO_JSON_DUMP=False
 
 __author__="Antonio M-B | aantoniomarinb@github.com"
 __version__ = "0.1.3"
@@ -55,24 +57,39 @@ def filterFilesByExtension(candidateFiles_RELPATH: list, extensionstr: str) -> l
 '''--------------------- FILE ANALYSIS FUNCTIONS ------------------'''
 
 
-def getFileAnalysis(file: str) -> vt.Object:
+def getFileAnalysis(file: str) -> dict:
+    #MD5_File_Hash = HashFileMD5(file)
+    MD5_File_Hash = HashFileMD5(file)
+    analysis_url = f"https://www.virustotal.com/api/v3/files/{MD5_File_Hash}"
+    headers={
+        "accept" : "application/json",
+        "x-apikey" : client_api_key
+    }
+
+    ''' REQUEST THE VT-API/V3 FOR FILE ANALYSIS, NOT SCANS!! '''
     try:
         if VERBOSE: print("REQUESTING FILE ANALYSIS: " + file)
-        MD5_File_Hash = HashFileMD5(file)
-        analysis = client.get_object("/files/" + MD5_File_Hash)
-        return analysis
+        response=requests.get(analysis_url,headers=headers)
+
+        if response.status_code == 200:
+            if VERBOSE : print("\tRequest status for "+file+" == OK!")
+            #print(response.json())
+
+            if not NO_JSON_DUMP:
+                with open(f"{file}-{MD5_File_Hash}.json", "w", encoding="utf-8") as json_file:
+                    data = response.json()
+                    json.dump(data, json_file, indent=4)
+
+        else:
+            print("Status code for " + file + " == " + str(response.status_code))
+            #@TO-DO: SEND FILES TO SCAN WHEN NOT FOUND ALREADY SCANNED
 
 
     #API ERROR HANDLING
-    except vt.error.APIError as e:
-        #IF NOT FOUND IN VT DATABASE, SCAN IT
-        if e.args[0] == "NotFoundError":
-            return scanFile(file)
-        else:
-            #IF API ERROR CANT BE HANDLED, CLOSE CLIENT AND RAISE ERROR
-            client.close()
-            print("API Error: " + str(e))
-            raise
+    except Exception as e:
+        print(e)
+
+getFileAnalysis("abc")
 
 
 def scanFile(file: str) -> vt.Object:
