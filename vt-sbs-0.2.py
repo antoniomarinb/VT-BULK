@@ -1,16 +1,25 @@
 import sys, hashlib, vt, os, time, requests, json
 from queue import Queue
 
-client_api_key=open("vt_api_key.txt","r").read()
-global WAIT_TIME_SCAN
+#Constants
 WAIT_TIME_SCAN=30
-global PROGRAM_USAGE_STR
 PROGRAM_USAGE_STR="python vt-sbs.py [ | -e {extensions} | -u | --unsafe-only | -f | --full-report (NOT IMPLEMENTED)] PATH_TO_DIR"
-global VERBOSE
+
+#Environment variables
 VERBOSE = True
-global NO_JSON_DUMP
 NO_JSON_DUMP=False
 
+#Runtime global variables
+scanQueue = Queue()
+everyFileResult = list(dict())
+client_api_key=open("vt_api_key.txt","r").read()
+headers={
+        "accept" : "application/json",
+        "x-apikey" : client_api_key
+    }
+
+
+#Program data
 __author__="Antonio M-B | aantoniomarinb@github.com"
 __version__ = "0.1.3"
 __maintainer__="Antonio M-B"
@@ -56,63 +65,88 @@ def filterFilesByExtension(candidateFiles_RELPATH: list, extensionstr: str) -> l
 
 '''--------------------- FILE ANALYSIS FUNCTIONS ------------------'''
 
+#FETCH FILE ANALYSIS FROM VT
+def getFileAnalysis(file_hash: str) ->int & dict | None:
+    global headers
+    analysis_url = f"https://www.virustotal.com/api/v3/files/{file_hash}"
 
-def getFileAnalysis(file: str) -> dict:
-    #MD5_File_Hash = HashFileMD5(file)
-    MD5_File_Hash = HashFileMD5(file)
-    analysis_url = f"https://www.virustotal.com/api/v3/files/{MD5_File_Hash}"
-    headers={
-        "accept" : "application/json",
-        "x-apikey" : client_api_key
-    }
-
-    ''' REQUEST THE VT-API/V3 FOR FILE ANALYSIS, NOT SCANS!! '''
     try:
-        if VERBOSE: print("REQUESTING FILE ANALYSIS: " + file)
         response=requests.get(analysis_url,headers=headers)
-
-        if response.status_code == 200:
-            if VERBOSE : print("\tRequest status for "+file+" == OK!")
-            #print(response.json())
-
-            if not NO_JSON_DUMP:
-                with open(f"{file}-{MD5_File_Hash}.json", "w", encoding="utf-8") as json_file:
-                    data = response.json()
-                    json.dump(data, json_file, indent=4)
-
-        else:
-            print("Status code for " + file + " == " + str(response.status_code))
-            #@TO-DO: SEND FILES TO SCAN WHEN NOT FOUND ALREADY SCANNED
-
+        return response.status_code, response.json()
 
     #API ERROR HANDLING
     except Exception as e:
         print(e)
 
-getFileAnalysis("abc")
 
-
-def scanFile(file: str) -> vt.Object:
-    # Scans the file
-    print("SCANNING: " + file)
-
+#SENDS FILE TO VT FOR SCANNING
+def scanFile(file_path: str) -> int & str:#Puts analysis link into ScanQueue
+    global scanQueue, headers
     try:
-        with open(file, "rb") as f:
-            analysis = client.scan_file(f)
+        if VERBOSE: print("SCANNING: " + file_path)
+        with open(file_path, "rb") as f:
+            response = requests.post("https://www.virustotal.com/api/v3/files", files={"file": f}, headers=headers)
 
-        while True:
-            analysis = client.get_object("/analyses/" + analysis.id)
-            print(analysis.status)
-            if analysis.status == "completed":
-                break
-            time.sleep(WAIT_TIME_SCAN)
-        return analysis
+        if(response.status_code == 200):
+            scanQueue.put(response.json()['data']['links']['self'])
+        return response.status_code, response.json()
 
-    except vt.error.APIError as e:
-        client.close()
-        print("API Error: " + str(e))
-        raise
+    except Exception as e:
+        print(e)
 
+#TODO
+def getQueuedScansResults():
+    global scanQueue, headers
+    while(not scanQueue.empty()):
+        link = scanQueue.get()
+        try: response = requests.get(link, headers=headers)
+        except Exception as e: print(e); return None
+
+        if(response.json()['data']['attributes']['status'] == "completed"):
+            results=response.json()
+            createAnalysisFile(results, "vt-sbs-0.2.py")
+            code, results = getFileAnalysis(results["data"]["meta"]["sha256"])
+            if(code==200):
+                file_name=results["data"]["attributes"]["names"][0]
+                print(f"Successfully scanned file: {file_name}")
+                createAnalysisFile(results, file_name)
+                printSummarizedReport(results)
+                everyFileResult.append(results["data"]["attributes"]["last_analysis_stats"])
+        else:
+            scanQueue.put(link)
+            time.sleep(1)
+
+def fileWizard(file : str) -> None:
+
+    hash=HashFileMD5(file)
+    if VERBOSE: print("REQUESTING FILE ANALYSIS: " + file)
+    code, results = getFileAnalysis(hash)
+
+    if (code == 200):
+        print(file + " : Scan retrieved successfully")
+        createAnalysisFile(results, file)
+        printSummarizedReport(results)
+        everyFileResult.append(results["data"]["attributes"]["last_analysis_stats"])
+
+    elif (code==404):
+        print(file + " : Does not have valid previous analyses, sending it for scanning")
+        request_status, response = scanFile(file)
+        if (request_status == 200):  print("Sent successfully")
+        else:   print("Could not be sent for scanning: ",response)
+
+    else:
+        print(file + " : Error code: " + str(code))
+
+'''-----------------FILE FORMATTING FUNCTIONS---------'''
+
+def createAnalysisFile(jsondump : dict, file_path : str):
+    with open(f"{file_path}-{HashFileMD5(file_path)}.analysis.json", "w", encoding="utf-8") as json_file:
+        json.dump(jsondump, json_file, indent=4)
+
+def printSummarizedReport(jsondump : dict):
+    print(f"Registered name: {jsondump["data"]["attributes"]["names"][0]}")
+    print(f"Link: {jsondump['data']['links']["self"]}")
+    print(f"Summary: {jsondump['data']['attributes']['last_analysis_stats']}")
 
 '''-----------------HELPER FUNCTIONS------------------'''
 
@@ -225,66 +259,27 @@ def LaunchSimpleTUI():
 
 # FILE ANALYSIS HANDLERS
 def ScanAndGetResults(files: list):
-    exit_code = 0
-    try:
-        global client
-        client = vt.Client(client_api_key)
-        try:
-            malicious = 0
-            malicious_list = []
+    global everyFileResult
 
-            suspicious = 0
-            suspicious_list = []
+    summarized_results = {
+        "malicious_files": list(),
+        "suspicious_files": list(),
+        "undetected_files": list()
+    }
 
-            undetected = 0
+    for file_path in files:
+        everyFileResult.append({file_path, fileWizard(file_path)})
+    getQueuedScansResults()
 
-            for file in files:
-                full_analysis = getFileAnalysis(file)
-                print(full_analysis)
-                try:
-                    analysis_stats = full_analysis.last_analysis_stats  # Fetch from /files/
-                except:
-                    analysis_stats = full_analysis.stats  # Fetch from /analyses/
+    for file_results in everyFileResult :
+        if file_results[1]["malicious"] != 0: summarized_results["malicious_files"].append(file_results[0])
+        elif file_results[1]["suspicious"] != 0: summarized_results["suspicious_files"].append(file_results[0])
+        else: summarized_results["undetected_files"].append(file_results[0])
 
-                if not full_report:
-                    # print(analysis.stats["malicious"])
-                    if (analysis_stats["malicious"] != 0 or analysis_stats["suspicious"] != 0):
-                        print(file + ": ")
-                        if (analysis_stats["malicious"] != 0):
-                            malicious += 1
-                            malicious_list.append(file)
-                            print("Malicious: " + str(analysis_stats["malicious"]))
-                        if (analysis_stats["suspicious"] != 0):
-                            suspicious += 1
-                            suspicious_list.append(file)
-                            print("Suspicious: " + str(analysis_stats["suspicious"]))
+    print("Malicious: "+str(summarized_results["malicious_files"]))
+    print("Suspicious: "+str(summarized_results["suspicious_files"]))
+    print("Undetected: "+str(summarized_results["undetected_files"]))
 
-                    else:
-                        undetected += 1
-                        if not only_print_unsafe: print(file + ": Clean!")
-                else:  # TO DO
-                    print(file + ": ")
-                    print(analysis_stats)
-
-                # PRINT SUMMARY
-            print("------ SUMMARY ------")
-            print("UNDETECTED: " + str(undetected))
-            print("SUSPICIOUS: " + str(suspicious))
-            if (suspicious > 0): print(suspicious_list)
-            print("MALICIOUS: " + str(malicious))
-            if (malicious > 0): print(malicious_list)
-
-        except Exception as e:
-            exit_code = 1
-            print("Couldnt process file: " + file)
-            client.close()
-            exit(exit_code)
-
-    except Exception as e:
-        print(e)
-        exit_code = 2
-    finally:
-        client.close()
 
 
 ######### MAIN #########
