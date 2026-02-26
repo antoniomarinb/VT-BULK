@@ -21,9 +21,10 @@ headers={
 
 #Program data
 __author__="Antonio M-B | aantoniomarinb@github.com"
-__version__ = "0.1.3"
+__program_name__="vt-bulk.0.2"
+__version__ = "0.2"
 __maintainer__="Antonio M-B"
-__status__=" 0.1 Development"
+__status__=" 0.2 Development"
 __ascii_art__= r'''
  /$$    /$$ /$$$$$$$$      /$$$$$$$  /$$   /$$ /$$       /$$   /$$      
 | $$   | $$|__  $$__/     | $$__  $$| $$  | $$| $$      | $$  /$$/      
@@ -88,7 +89,7 @@ def scanFile(file_path: str) -> int & str:#Puts analysis link into ScanQueue
             response = requests.post("https://www.virustotal.com/api/v3/files", files={"file": f}, headers=headers)
 
         if(response.status_code == 200):
-            scanQueue.put(response.json()['data']['links']['self'])
+            scanQueue.put((file_path, response.json()['data']['links']['self']))    #insert into queue as (file_path, link)
         return response.status_code, response.json()
 
     except Exception as e:
@@ -98,53 +99,58 @@ def scanFile(file_path: str) -> int & str:#Puts analysis link into ScanQueue
 def getQueuedScansResults():
     global scanQueue, headers
     while(not scanQueue.empty()):
-        link = scanQueue.get()
+        pair = scanQueue.get()
+        file_path=pair[0]; link=pair[1]
+
         try: response = requests.get(link, headers=headers)
         except Exception as e: print(e); return None
 
         if(response.json()['data']['attributes']['status'] == "completed"):
             results=response.json()
-            createAnalysisFile(results, "vt-sbs-0.2.py")
-            code, results = getFileAnalysis(results["data"]["meta"]["sha256"])
+            createAnalysisFile(results, file_path)
+            code, results = getFileAnalysis(results["meta"]["file_info"]["sha256"])
             if(code==200):
                 file_name=results["data"]["attributes"]["names"][0]
                 print(f"Successfully scanned file: {file_name}")
                 createAnalysisFile(results, file_name)
                 printSummarizedReport(results)
-                everyFileResult.append(results["data"]["attributes"]["last_analysis_stats"])
+                everyFileResult.append((os.path.basename(file_path), results["data"]["attributes"]["last_analysis_stats"]))
         else:
-            scanQueue.put(link)
+            if VERBOSE: print(f"STATUS: {file_path}: {response.json()['data']['attributes']['status']}")
+            scanQueue.put(pair)
             time.sleep(1)
 
-def fileWizard(file : str) -> None:
+def fileWizard(file_path : str) -> None:
 
-    hash=HashFileMD5(file)
-    if VERBOSE: print("REQUESTING FILE ANALYSIS: " + file)
+    hash=HashFileMD5(file_path)
+    if VERBOSE: print("REQUESTING FILE ANALYSIS: " + file_path)
     code, results = getFileAnalysis(hash)
 
     if (code == 200):
-        print(file + " : Scan retrieved successfully")
-        createAnalysisFile(results, file)
+        print(file_path + " : Scan retrieved successfully")
+        createAnalysisFile(results, file_path)
         printSummarizedReport(results)
-        everyFileResult.append(results["data"]["attributes"]["last_analysis_stats"])
+        everyFileResult.append((os.path.basename(file_path),results["data"]["attributes"]["last_analysis_stats"]))
 
     elif (code==404):
-        print(file + " : Does not have valid previous analyses, sending it for scanning")
-        request_status, response = scanFile(file)
+        print(file_path + " : Does not have valid previous analyses, sending it for scanning")
+        request_status, response = scanFile(file_path)
         if (request_status == 200):  print("Sent successfully")
         else:   print("Could not be sent for scanning: ",response)
 
     else:
-        print(file + " : Error code: " + str(code))
+        print(file_path + " : Error code: " + str(code))
 
 '''-----------------FILE FORMATTING FUNCTIONS---------'''
 
 def createAnalysisFile(jsondump : dict, file_path : str):
-    with open(f"{file_path}-{HashFileMD5(file_path)}.analysis.json", "w", encoding="utf-8") as json_file:
+    if not os.path.exists("./scans"):
+        os.makedirs("./scans")
+    with open(f"./scans/{os.path.basename(file_path)}-{HashFileMD5(file_path)}.analysis.json", "w", encoding="utf-8") as json_file:
         json.dump(jsondump, json_file, indent=4)
 
 def printSummarizedReport(jsondump : dict):
-    print(f"Registered name: {jsondump["data"]["attributes"]["names"][0]}")
+    if(len(jsondump["data"]["attributes"]["names"])!=0): print(f"Registered name: {jsondump["data"]["attributes"]["names"][0]}")
     print(f"Link: {jsondump['data']['links']["self"]}")
     print(f"Summary: {jsondump['data']['attributes']['last_analysis_stats']}")
 
@@ -268,7 +274,9 @@ def ScanAndGetResults(files: list):
     }
 
     for file_path in files:
-        everyFileResult.append({file_path, fileWizard(file_path)})
+        fileWizard(file_path)
+
+    print("Retrieving queued scans")
     getQueuedScansResults()
 
     for file_results in everyFileResult :
