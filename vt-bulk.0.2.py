@@ -12,12 +12,7 @@ NO_JSON_DUMP=False
 #Runtime global variables
 scanQueue = Queue()
 everyFileResult = list(dict())
-client_api_key=open("vt_api_key.txt","r").read()
-headers={
-        "accept" : "application/json",
-        "x-apikey" : client_api_key
-    }
-
+client_api_key = ""
 
 #Program data
 __author__="Antonio M-B | aantoniomarinb@github.com"
@@ -262,6 +257,18 @@ def LaunchSimpleTUI():
     extension = input()
     return DIRECTORY_PATH, extension
 
+def APIHelper():
+    global client_api_key
+    print("Seems like you dont have an vt_api_key.txt file, let me help you with that")
+    while(len(client_api_key)!=64):
+        client_api_key=input("Paste your Virus Total API key: ")
+        if(len(client_api_key)!=64): print("Invalid API key")
+    with open("vt_api_key.txt","w") as api_key_file:
+        api_key_file.write(client_api_key)
+        api_key_file.close()
+    print("All set!, resuming")
+
+
 
 # FILE ANALYSIS HANDLERS
 def ScanAndGetResults(files: list):
@@ -292,6 +299,17 @@ def ScanAndGetResults(files: list):
 
 ######### MAIN #########
 print(__ascii_art__)
+
+try:
+    client_api_key = open("vt_api_key.txt", "r").read()
+except FileNotFoundError:
+    APIHelper()
+
+headers={
+        "accept" : "application/json",
+        "x-apikey" : client_api_key
+    }
+
 argumentHandler()
 files = getFilesToScan(DIRECTORY_PATH, extension)
 getUserVerification(files)
