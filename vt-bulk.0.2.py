@@ -14,12 +14,11 @@ CHECK_QUOTA=True
 #Runtime global variables
 scanQueue = Queue()
 everyFileResult = list(dict())
-client_api_key = ""
 
 #Program data
 __author__="Antonio M-B | antoniomarinb@github.com"
 __program_name__="vt-bulk.0.2"
-__version__ = "0.2"
+__version__ = "0.2.1"
 __maintainer__="Antonio M-B"
 __status__=" 0.2 Development"
 __ascii_art__= r'''
@@ -77,7 +76,7 @@ def getFileAnalysis(file_hash: str) ->int & dict | None:
 
 
 #SENDS FILE TO VT FOR SCANNING
-def scanFile(file_path: str) -> int & str:#Puts analysis link into ScanQueue
+def scanFile(file_path: str) -> int &  str:#Puts analysis link into ScanQueue
     global scanQueue, headers
     try:
         if VERBOSE: print("SCANNING: " + file_path)
@@ -152,8 +151,8 @@ def createAnalysisFile(jsondump : dict, file_path : str):
 
 def printSummarizedReport(jsondump : dict):
     if(len(jsondump["data"]["attributes"]["names"])!=0): print(f"Registered name: {jsondump["data"]["attributes"]["names"][0]}")
-    if VERBOSE : print(f"Link: {jsondump['data']['links']["self"]}")
-    print(f"Summary: {jsondump['data']['attributes']['last_analysis_stats']}")
+    if VERBOSE : print(f"\tLink: {jsondump['data']['links']["self"]}")
+    print(f"\tSummary: {jsondump['data']['attributes']['last_analysis_stats']}")
 
 '''-----------------HELPER FUNCTIONS------------------'''
 
@@ -186,15 +185,12 @@ def getUserVerification(files: list):
 
 
 def argumentHandler():
-    global DIRECTORY_PATH, extension, only_print_unsafe, full_report
+    global DIRECTORY_PATH, extension
     DIRECTORY_PATH = None
     extension = None
-    only_print_unsafe = False
-    full_report = False
 
     sys.argv.pop(0)  # Pop scripts name
 
-    # if(sys.argv.__len__()==0): exit("Program usage: python vtbu.py [-e {extension} | other_arguments] PATH_TO_DIR")
     if (sys.argv.__len__() == 0):
         DIRECTORY_PATH, extension = LaunchSimpleTUI()
         return
@@ -254,18 +250,28 @@ def HashFileMD5(file: str) -> str:
     return md5.hexdigest()
 
 def LaunchSimpleTUI():
+    global NO_JSON_DUMP
     DIRECTORY_PATH = input("Choose directory to fetch files from (if blank, will choose the current dir): ")
     if(DIRECTORY_PATH == ""):
         DIRECTORY_PATH = os.getcwd()
     print("Extensions to scan (leave blank to scan every extension)")
     print("F.E: .dll, .exe")
     extension = input()
+
+    while(1):
+        user_wants_dumps=input("Do you want the results dumped into .json files? (y/n) :")
+        if(user_wants_dumps[0].lower() == "y"): NO_JSON_DUMP=False; break
+        elif(user_wants_dumps[0].lower() == "n"): NO_JSON_DUMP=True; break
+
+
     return DIRECTORY_PATH, extension
 
 def APIHelper():
-    global client_api_key
+    global client_api_key,vt_user_id
+    vt_user_id = ""
+    client_api_key = ""
     print("Seems like you dont have an vt_api_key.txt file, let me help you with that")
-    while(len(vt_user_id==0)):
+    while(vt_user_id==""):
         vt_user_id = input("Enter your Virus total user id (Virus Total -> Profile) : ")
     while(len(client_api_key)!=64):
         client_api_key=input(f"Paste your Virus Total API key (https://www.virustotal.com/gui/user/{vt_user_id}/apikey) : ")
@@ -276,13 +282,13 @@ def APIHelper():
     print("All set!, resuming")
 
 
-def getDailyAPIQuotaStats():
+def printAndSaveDailyAPIQuotaStats():
     global headers
     response = requests.get(f"https://www.virustotal.com/api/v3/users/{vt_user_id}/api_usage", headers=headers)
     response_json=response.json()
     if response.status_code==200:
         print("Daily API Quota Stats: ")
-        print(response_json["data"]["daily"][datetime.datetime.today().strftime('%Y-%m-%d')])
+        print("\t"+str(response_json["data"]["daily"][datetime.datetime.today().strftime('%Y-%m-%d')]))
         if(not NO_JSON_DUMP):
             with open(f"quota_stats.json", "w", encoding="utf-8") as json_file:
                 json.dump(response_json, json_file, indent=4)
@@ -312,32 +318,33 @@ def ScanAndGetResults(files: list):
         elif file_results[1]["suspicious"] != 0: summarized_results["suspicious_files"].append(file_results[0])
         else: summarized_results["undetected_files"].append(file_results[0])
 
-    print("Malicious: "+str(summarized_results["malicious_files"]))
-    print("Suspicious: "+str(summarized_results["suspicious_files"]))
-    print("Undetected: "+str(summarized_results["undetected_files"]))
+    print("\tMalicious: "+str(summarized_results["malicious_files"]))
+    print("\tSuspicious: "+str(summarized_results["suspicious_files"]))
+    print("\tUndetected: "+str(summarized_results["undetected_files"]))
 
 
 
 ######### MAIN #########
-print(__ascii_art__)
 
-try:
-    api_and_user_string = open("vt_api_key.txt", "r").read()
-except FileNotFoundError:
-    APIHelper()
+if __name__ == '__main__':
 
-client_api_key = api_and_user_string.split(":")[0]
-vt_user_id = api_and_user_string.split(":")[1]
+    try:
+        api_and_user_string = open("vt_api_key.txt", "r").read()
+    except FileNotFoundError:
+        APIHelper()
+        api_and_user_string = open("vt_api_key.txt", "r").read()
 
-headers={
-        "accept" : "application/json",
-        "x-apikey" : client_api_key
-    }
+    client_api_key = api_and_user_string.split(":")[0]
+    vt_user_id = api_and_user_string.split(":")[1]
+    headers={
+            "accept" : "application/json",
+            "x-apikey" : client_api_key
+        }
 
-argumentHandler()
-files = getFilesToScan(DIRECTORY_PATH, extension)
-getUserVerification(files)
-ScanAndGetResults(files)
-getDailyAPIQuotaStats()
-
-exit(0)
+    print(__ascii_art__)
+    argumentHandler()
+    files = getFilesToScan(DIRECTORY_PATH, extension)
+    getUserVerification(files)
+    ScanAndGetResults(files)
+    printAndSaveDailyAPIQuotaStats()
+    exit(0)
