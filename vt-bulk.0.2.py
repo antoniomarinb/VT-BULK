@@ -1,4 +1,4 @@
-import sys, hashlib, os, time, requests, json
+import sys, hashlib, os, time, requests, json, datetime
 from queue import Queue
 
 #Constants
@@ -9,6 +9,7 @@ PROGRAM_USAGE_STR="python vt-sbs.py [ | -e {extensions} | -u | --unsafe-only | -
 #Environment variables
 VERBOSE = True
 NO_JSON_DUMP=False
+CHECK_QUOTA=True
 
 #Runtime global variables
 scanQueue = Queue()
@@ -264,13 +265,28 @@ def LaunchSimpleTUI():
 def APIHelper():
     global client_api_key
     print("Seems like you dont have an vt_api_key.txt file, let me help you with that")
+    while(len(vt_user_id==0)):
+        vt_user_id = input("Enter your Virus total user id (Virus Total -> Profile) : ")
     while(len(client_api_key)!=64):
-        client_api_key=input("Paste your Virus Total API key: ")
+        client_api_key=input(f"Paste your Virus Total API key (https://www.virustotal.com/gui/user/{vt_user_id}/apikey) : ")
         if(len(client_api_key)!=64): print("Invalid API key")
     with open("vt_api_key.txt","w") as api_key_file:
-        api_key_file.write(client_api_key)
+        api_key_file.write(f"{client_api_key}:{vt_user_id}")
         api_key_file.close()
     print("All set!, resuming")
+
+
+def getDailyAPIQuotaStats():
+    global headers
+    response = requests.get(f"https://www.virustotal.com/api/v3/users/{vt_user_id}/api_usage", headers=headers)
+    response_json=response.json()
+    if response.status_code==200:
+        print("Daily API Quota Stats: ")
+        print(response_json["data"]["daily"][datetime.datetime.today().strftime('%Y-%m-%d')])
+        with open(f"quota_stats.json", "w", encoding="utf-8") as json_file:
+            json.dump(response_json, json_file, indent=4)
+    else:
+        print(f"Could not fetch quota stats, request code \"{response.status_code}\", skipping. ")
 
 
 
@@ -305,9 +321,12 @@ def ScanAndGetResults(files: list):
 print(__ascii_art__)
 
 try:
-    client_api_key = open("vt_api_key.txt", "r").read()
+    api_and_user_string = open("vt_api_key.txt", "r").read()
 except FileNotFoundError:
     APIHelper()
+
+client_api_key = api_and_user_string.split(":")[0]
+vt_user_id = api_and_user_string.split(":")[1]
 
 headers={
         "accept" : "application/json",
@@ -318,4 +337,6 @@ argumentHandler()
 files = getFilesToScan(DIRECTORY_PATH, extension)
 getUserVerification(files)
 ScanAndGetResults(files)
+getDailyAPIQuotaStats()
+
 exit(0)
