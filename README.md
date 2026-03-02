@@ -25,6 +25,7 @@ CURRENT PROGRAM FUNCTIONALITY:
   - Send files for analysis to VirusTotal (show and store results).
 
 TODO:
+  - If file is retrieved from vt cache, check multiple hashes to make sure it is not a false match
   - Fix terminal arguments
   - Reduce the amount of API usage by not requesting recently scanned files.
   - Maybe bulk scan URLs in a future?
