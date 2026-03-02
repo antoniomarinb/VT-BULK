@@ -283,8 +283,9 @@ def getDailyAPIQuotaStats():
     if response.status_code==200:
         print("Daily API Quota Stats: ")
         print(response_json["data"]["daily"][datetime.datetime.today().strftime('%Y-%m-%d')])
-        with open(f"quota_stats.json", "w", encoding="utf-8") as json_file:
-            json.dump(response_json, json_file, indent=4)
+        if(not NO_JSON_DUMP):
+            with open(f"quota_stats.json", "w", encoding="utf-8") as json_file:
+                json.dump(response_json, json_file, indent=4)
     else:
         print(f"Could not fetch quota stats, request code \"{response.status_code}\", skipping. ")
 
