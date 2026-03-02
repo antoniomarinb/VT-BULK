@@ -5,7 +5,8 @@ Ver 0.2:
 \t Added some super cool ascii art
 \t Program had an identity crysis, renamed twice.
 \t Rebuilt most of the file sending logic
-\t Ask the user for api_key if file does not exist
+\t Ask the user for api_key and user_id if not found
+\t Get API daily usage
 
 Ver 0.3 TODO:
 \t Files sent for Analysis take 2 requests due to API response mismatches, lets try to take it down to one
