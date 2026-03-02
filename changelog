@@ -1,0 +1,12 @@
+Ver 0.2:
+\t Migrated from vt python packages, requests are now being made with python.requests
+\t Programs that need scanning get placed in a queue, which gets retrieved at the end
+\t .json dumps for every file scanned
+\t Added some super cool ascii art
+\t Program had an identity crysis, renamed twice.
+\t Rebuilt most of the file sending logic
+\t Ask the user for api_key if file does not exist
+
+Ver 0.3 TODO:
+\t Files sent for Analysis take 2 requests due to API response mismatches, lets try to take it down to one
+\t Free API has an analysis limit of 4/min, should take it into account when queueing files for analysis 
