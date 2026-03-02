@@ -1,8 +1,9 @@
-import sys, hashlib, vt, os, time, requests, json
+import sys, hashlib, os, time, requests, json
 from queue import Queue
 
 #Constants
 WAIT_TIME_SCAN=30
+QUEUE_RETRY_DELAY=2
 PROGRAM_USAGE_STR="python vt-sbs.py [ | -e {extensions} | -u | --unsafe-only | -f | --full-report (NOT IMPLEMENTED)] PATH_TO_DIR"
 
 #Environment variables
@@ -15,7 +16,7 @@ everyFileResult = list(dict())
 client_api_key = ""
 
 #Program data
-__author__="Antonio M-B | aantoniomarinb@github.com"
+__author__="Antonio M-B | antoniomarinb@github.com"
 __program_name__="vt-bulk.0.2"
 __version__ = "0.2"
 __maintainer__="Antonio M-B"
@@ -45,7 +46,6 @@ def getAllFilesInDirHierarchy(rootDir : str) -> list : #RETURN RELATIVE_PATH OF 
             full_path = os.path.join(root, file)
             files_list.append(full_path)
     return files_list
-
 
 def filterFilesByExtension(candidateFiles_RELPATH: list, extensionstr: str) -> list:  # SHOULD BE CALLED ONCE
 
@@ -92,7 +92,7 @@ def scanFile(file_path: str) -> int & str:#Puts analysis link into ScanQueue
 
 #TODO
 def getQueuedScansResults():
-    global scanQueue, headers
+    global scanQueue, headers, QUEUE_RETRY_DELAY, VERBOSE
     while(not scanQueue.empty()):
         pair = scanQueue.get()
         file_path=pair[0]; link=pair[1]
@@ -113,7 +113,8 @@ def getQueuedScansResults():
         else:
             if VERBOSE: print(f"STATUS: {file_path}: {response.json()['data']['attributes']['status']}")
             scanQueue.put(pair)
-            time.sleep(1)
+            if VERBOSE : print(f"Waiting for: {QUEUE_RETRY_DELAY}s")
+            time.sleep(QUEUE_RETRY_DELAY)
 
 def fileWizard(file_path : str) -> None:
 
@@ -139,6 +140,10 @@ def fileWizard(file_path : str) -> None:
 '''-----------------FILE FORMATTING FUNCTIONS---------'''
 
 def createAnalysisFile(jsondump : dict, file_path : str):
+    global NO_JSON_DUMP
+
+    if NO_JSON_DUMP:
+        return
     if not os.path.exists("./scans"):
         os.makedirs("./scans")
     with open(f"./scans/{os.path.basename(file_path)}-{HashFileMD5(file_path)}.analysis.json", "w", encoding="utf-8") as json_file:
@@ -146,7 +151,7 @@ def createAnalysisFile(jsondump : dict, file_path : str):
 
 def printSummarizedReport(jsondump : dict):
     if(len(jsondump["data"]["attributes"]["names"])!=0): print(f"Registered name: {jsondump["data"]["attributes"]["names"][0]}")
-    print(f"Link: {jsondump['data']['links']["self"]}")
+    if VERBOSE : print(f"Link: {jsondump['data']['links']["self"]}")
     print(f"Summary: {jsondump['data']['attributes']['last_analysis_stats']}")
 
 '''-----------------HELPER FUNCTIONS------------------'''
@@ -246,7 +251,6 @@ def HashFileMD5(file: str) -> str:
                 break
             md5.update(data)
     return md5.hexdigest()
-
 
 def LaunchSimpleTUI():
     DIRECTORY_PATH = input("Choose directory to fetch files from (if blank, will choose the current dir): ")
