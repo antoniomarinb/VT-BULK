@@ -8,6 +8,8 @@ Ver 0.2:
 \t Ask the user for api_key and user_id if not found
 \t Get API daily usage
 
-Ver 0.3 TODO:
-\t Files sent for Analysis take 2 requests due to API response mismatches, lets try to take it down to one
-\t Free API has an analysis limit of 4/min, should take it into account when queueing files for analysis 
+Ver 0.3
+\t Multi-threading is here!
+\t Simplified program (I think)
+\t Reworked whole program functionality
+\t API minutely rate limit is now taken into account (requesting a new file scan it is).
