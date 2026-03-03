@@ -19,6 +19,7 @@ PACKAGE DEPENDENCIES:
   - json: .json file dumping and formatting
   - datetime: filter daily api usage by day 
   - queue: Queue analyses for later retrieval
+  - threading: Multi-threading.
 
 CURRENT PROGRAM FUNCTIONALITY:
   - Get file detections in bulk via the VirusTotal API.

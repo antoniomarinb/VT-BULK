@@ -1,8 +1,8 @@
-import sys, hashlib, os, time, requests, json, datetime
+import sys, hashlib, os, time, requests, json, datetime, threading
 from queue import Queue
 
 #Constants
-WAIT_TIME_SCAN=30
+API_SCAN_REQUESTS_PER_MINUTE=4
 QUEUE_RETRY_DELAY=2
 PROGRAM_USAGE_STR="python vt-sbs.py [ | -e {extensions} | -u | --unsafe-only | -f | --full-report (NOT IMPLEMENTED)] PATH_TO_DIR"
 
@@ -11,16 +11,20 @@ VERBOSE = True
 NO_JSON_DUMP=False
 CHECK_QUOTA=True
 
+
 #Runtime global variables
-scanQueue = Queue()
-everyFileResult = list(dict())
+finished_requesting_scans=False
+analysis_results_queue = Queue()
+files_need_scanning_queue = Queue()
+path_and_link_to_requested_analysis_queue = Queue()
+
 
 #Program data
 __author__="Antonio M-B | antoniomarinb@github.com"
-__program_name__="vt-bulk.0.2"
-__version__ = "0.2.1"
+__program_name__="vt-bulk.0.3"
+__version__ = "0.3"
 __maintainer__="Antonio M-B"
-__status__=" 0.2 Development"
+__status__=" 0.3 Development"
 __ascii_art__= r'''
  /$$    /$$ /$$$$$$$$      /$$$$$$$  /$$   /$$ /$$       /$$   /$$      
 | $$   | $$|__  $$__/     | $$__  $$| $$  | $$| $$      | $$  /$$/      
@@ -32,7 +36,7 @@ __ascii_art__= r'''
     \_/       |__/        |_______/  \______/ |________/|__/  \__/      
 '''
 
-'''--------------------FILE SCANNING FUNCTIONS------------------'''
+'''--------------------- FILE CANDIDATE SELECTION ----------------------'''
 
 def getFilesToScan(rootDir : str, extension : str) -> list:
 
@@ -59,102 +63,131 @@ def filterFilesByExtension(candidateFiles_RELPATH: list, extensionstr: str) -> l
               file.split(".")[-1] in extensionset]  # Return every file that matches with one of the extensions
     return output
 
-'''--------------------- FILE ANALYSIS FUNCTIONS ------------------'''
+'''--------------------- FILE ANALYSIS FUNCTIONS ----------------------'''
 
-#FETCH FILE ANALYSIS FROM VT
-def getFileAnalysis(file_hash: str) ->int & dict | None:
-    global headers
-    analysis_url = f"https://www.virustotal.com/api/v3/files/{file_hash}"
+def getQueuedScansResultsV2():
+    global path_and_link_to_requested_analysis_queue, headers, QUEUE_RETRY_DELAY, VERBOSE
 
-    try:
-        response=requests.get(analysis_url,headers=headers)
-        return response.status_code, response.json()
+    threads=[]
 
-    #API ERROR HANDLING
-    except Exception as e:
-        print(e)
-
-
-#SENDS FILE TO VT FOR SCANNING
-def scanFile(file_path: str) -> int &  str:#Puts analysis link into ScanQueue
-    global scanQueue, headers
-    try:
-        if VERBOSE: print("SCANNING: " + file_path)
-        with open(file_path, "rb") as f:
-            response = requests.post("https://www.virustotal.com/api/v3/files", files={"file": f}, headers=headers)
-
-        if(response.status_code == 200):
-            scanQueue.put((file_path, response.json()['data']['links']['self']))    #insert into queue as (file_path, link)
-        return response.status_code, response.json()
-
-    except Exception as e:
-        print(e)
-
-#TODO
-def getQueuedScansResults():
-    global scanQueue, headers, QUEUE_RETRY_DELAY, VERBOSE
-    while(not scanQueue.empty()):
-        pair = scanQueue.get()
+    while(not path_and_link_to_requested_analysis_queue.empty()):
+        pair = path_and_link_to_requested_analysis_queue.get()
         file_path=pair[0]; link=pair[1]
 
         try: response = requests.get(link, headers=headers)
         except Exception as e: print(e); return None
 
         if(response.json()['data']['attributes']['status'] == "completed"):
-            results=response.json()
-            createAnalysisFile(results, file_path)
-            code, results = getFileAnalysis(results["meta"]["file_info"]["sha256"])
-            if(code==200):
-                file_name=results["data"]["attributes"]["names"][0]
-                print(f"Successfully scanned file: {file_name}")
-                createAnalysisFile(results, file_name)
-                printSummarizedReport(results)
-                everyFileResult.append((os.path.basename(file_path), results["data"]["attributes"]["last_analysis_stats"]))
+            t=threading.Thread(target=multithread_GetFileResults,args=(file_path,))
+            t.start()
+            threads.append(t)
+
         else:
             if VERBOSE: print(f"STATUS: {file_path}: {response.json()['data']['attributes']['status']}")
-            scanQueue.put(pair)
+            path_and_link_to_requested_analysis_queue.put(pair)
             if VERBOSE : print(f"Waiting for: {QUEUE_RETRY_DELAY}s")
             time.sleep(QUEUE_RETRY_DELAY)
 
-def fileWizard(file_path : str) -> None:
+    for t in threads:
+        t.join()
+    return
 
-    hash=HashFileMD5(file_path)
-    if VERBOSE: print("REQUESTING FILE ANALYSIS: " + file_path)
-    code, results = getFileAnalysis(hash)
+def multithread_GetFileResults(file_path : str):
+    global headers
+    response=requests.get(f"https://www.virustotal.com/api/v3/files/{HashFileMD5(file_path)}",headers=headers)
 
-    if (code == 200):
-        print(file_path + " : Scan retrieved successfully")
-        createAnalysisFile(results, file_path)
-        printSummarizedReport(results)
-        everyFileResult.append((os.path.basename(file_path),results["data"]["attributes"]["last_analysis_stats"]))
+    if response.status_code == 200:
+        if VERBOSE: print(f"File {os.path.basename(file_path)} retrieved successfully")
+        jsondump = response.json()
+        analysis_results_queue.put({"file_path" : file_path, "names" : jsondump["data"]["attributes"]["names"], "link": jsondump['data']['links']["self"], "summary" : jsondump["data"]["attributes"]["last_analysis_stats"]  })
+        createAnalysisFile(jsondump, file_path)
 
-    elif (code==404):
-        print(file_path + " : Does not have valid previous analyses, sending it for scanning")
-        request_status, response = scanFile(file_path)
-        if (request_status == 200):  print("Sent successfully")
-        else:   print("Could not be sent for scanning: ",response)
+    elif response.status_code==404:
+        if VERBOSE: print(f"File {os.path.basename(file_path)} does not have valid previous analyses, sending to VT")
+        files_need_scanning_queue.put(file_path)
 
     else:
-        print(file_path + " : Error code: " + str(code))
+        print(f"UNKNOWN ERROR: {response.status_code}, EXITING NOW")
+        exit(1)
 
-'''-----------------FILE FORMATTING FUNCTIONS---------'''
+def multithread_launchProgram(file_list : list) -> None:
+    global finished_requesting_scans
+    threads=[]
 
-def createAnalysisFile(jsondump : dict, file_path : str):
-    global NO_JSON_DUMP
+    batch_results={
+        "malicious_files": list(),
+        "suspicious_files": list(),
+        "undetected_files": list()
+    }
 
-    if NO_JSON_DUMP:
-        return
-    if not os.path.exists("./scans"):
-        os.makedirs("./scans")
-    with open(f"./scans/{os.path.basename(file_path)}-{HashFileMD5(file_path)}.analysis.json", "w", encoding="utf-8") as json_file:
-        json.dump(jsondump, json_file, indent=4)
+    analysisWorker = threading.Thread(target=requestedAnalysisWorker)
+    analysisWorker.start()
 
-def printSummarizedReport(jsondump : dict):
-    if(len(jsondump["data"]["attributes"]["names"])!=0): print(f"Registered name: {jsondump["data"]["attributes"]["names"][0]}")
-    if VERBOSE : print(f"\tLink: {jsondump['data']['links']["self"]}")
-    print(f"\tSummary: {jsondump['data']['attributes']['last_analysis_stats']}")
+    for file_path in file_list:
+        t = threading.Thread(target=multithread_GetFileResults, args=(file_path,))
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
+    finished_requesting_scans=True
+    analysisWorker.join()
 
-'''-----------------HELPER FUNCTIONS------------------'''
+    getQueuedScansResultsV2()
+
+    while(not analysis_results_queue.empty()):
+        result = analysis_results_queue.get()
+        printSummarizedReport2(result)
+        if result["summary"]["malicious"]!=0: batch_results["malicious_files"].append(os.path.basename(result["file_path"]))
+        elif result["summary"]["suspicious"]!=0: batch_results["suspicious_files"].append(os.path.basename(result["file_path"]))
+        else: batch_results["undetected_files"].append(os.path.basename(result["file_path"]))
+
+    print("\nTotal results: ")
+    print("\tMalicious: " + str(batch_results["malicious_files"]))
+    print("\tSuspicious: " + str(batch_results["suspicious_files"]))
+    print("\tUndetected: " + str(batch_results["undetected_files"])+"\n")
+
+'''--------------------- WORKERS --------------------------------------'''
+class APIRateLimiter:
+    def __init__(self, analysis_requests_per_minute):
+        self.rpm = int(analysis_requests_per_minute)
+        self.queue = Queue()
+
+    def request(self):
+        if self.queue.qsize() >= self.rpm:
+            oldest_request_time = self.queue.get()
+            time_delta = time.time() - oldest_request_time
+            if time_delta <= 60:
+                if VERBOSE: print(f"API minutely upload minute reached, thread sleeping for: {60-time_delta}s.")
+                time.sleep(60-time_delta) #Sleep for time remaining for last request decay
+
+    def place(self):
+            self.queue.put(time.time())
+
+def requestedAnalysisWorker():  #Async queue manager for files sent to VT
+    global API_SCAN_REQUESTS_PER_MINUTE
+    rateLimiter = APIRateLimiter(API_SCAN_REQUESTS_PER_MINUTE)
+
+    while not finished_requesting_scans or not files_need_scanning_queue.empty():
+        if not files_need_scanning_queue.empty():
+            file_path = files_need_scanning_queue.get()
+            try:
+                with open(file_path, "rb") as f:
+
+                    rateLimiter.request()
+                    response = requests.post("https://www.virustotal.com/api/v3/files", files={"file": f},headers=headers)
+                    rateLimiter.place()
+
+            except Exception as e:
+                print(f"Could not open or send file {file_path}")
+                print(e)
+
+            if response.status_code == 200:
+                path_and_link_to_requested_analysis_queue.put((file_path, response.json()['data']['links']['self']))
+            else: print(f"Error has ocurred while attempting to send file {file_path} to Virus-Total")
+        else:
+            time.sleep(0.1)
+
+'''--------------------- AUXILIARY FUNCTIONS --------------------------'''
 
 def getUserVerification(files: list):
     # PREREQUISITES
@@ -182,7 +215,6 @@ def getUserVerification(files: list):
             return
         else:
             print("Unvalid option")
-
 
 def argumentHandler():
     global DIRECTORY_PATH, extension
@@ -230,7 +262,6 @@ def argumentHandler():
             sys.argv.pop(0)
     if DIRECTORY_PATH == None:
         exit("Aborted: file path cant be None")
-
 
 def HashFileMD5(file: str) -> str:
     # Source - https://stackoverflow.com/questions/22058048/hashing-a-file-in-python
@@ -281,7 +312,6 @@ def APIHelper():
         api_key_file.close()
     print("All set!, resuming")
 
-
 def printAndSaveDailyAPIQuotaStats():
     global headers
     response = requests.get(f"https://www.virustotal.com/api/v3/users/{vt_user_id}/api_usage", headers=headers)
@@ -295,36 +325,24 @@ def printAndSaveDailyAPIQuotaStats():
     else:
         print(f"Could not fetch quota stats, request code \"{response.status_code}\", skipping. ")
 
+def createAnalysisFile(jsondump : dict, file_path : str):
+    global NO_JSON_DUMP
+
+    if NO_JSON_DUMP:
+        return
+    if not os.path.exists("./scans"):
+        os.makedirs("./scans")
+    with open(f"./scans/{os.path.basename(file_path)}-{HashFileMD5(file_path)}.analysis.json", "w", encoding="utf-8") as json_file:
+        json.dump(jsondump, json_file, indent=4)
+
+def printSummarizedReport2(results : dict):
+    print("\n"+results["file_path"]+": ")
+    print(f"Registered names: {results["names"]}")
+    if VERBOSE: print(f"Link: {results["link"]}")
+    print(f"Results: {results["summary"]}")
 
 
-# FILE ANALYSIS HANDLERS
-def ScanAndGetResults(files: list):
-    global everyFileResult
-
-    summarized_results = {
-        "malicious_files": list(),
-        "suspicious_files": list(),
-        "undetected_files": list()
-    }
-
-    for file_path in files:
-        fileWizard(file_path)
-
-    print("Retrieving queued scans")
-    getQueuedScansResults()
-
-    for file_results in everyFileResult :
-        if file_results[1]["malicious"] != 0: summarized_results["malicious_files"].append(file_results[0])
-        elif file_results[1]["suspicious"] != 0: summarized_results["suspicious_files"].append(file_results[0])
-        else: summarized_results["undetected_files"].append(file_results[0])
-
-    print("\tMalicious: "+str(summarized_results["malicious_files"]))
-    print("\tSuspicious: "+str(summarized_results["suspicious_files"]))
-    print("\tUndetected: "+str(summarized_results["undetected_files"]))
-
-
-
-######### MAIN #########
+'''--------------------- MAIN ----------------------------------------'''
 
 if __name__ == '__main__':
 
@@ -345,6 +363,6 @@ if __name__ == '__main__':
     argumentHandler()
     files = getFilesToScan(DIRECTORY_PATH, extension)
     getUserVerification(files)
-    ScanAndGetResults(files)
+    multithread_launchProgram(files)
     printAndSaveDailyAPIQuotaStats()
     exit(0)
