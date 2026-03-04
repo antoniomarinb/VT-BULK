@@ -31,7 +31,7 @@ path_and_link_to_requested_analysis_queue = Queue()
 
 #Program data
 __author__="Antonio M-B | antoniomarinb@github.com"
-__program_name__="vt-bulk.0.3.1"
+__program_name__="vt-bulk.0.3.3.py"
 __version__ = "0.3.3"
 __maintainer__="Antonio M-B"
 __status__=" 0.3 Development"
@@ -62,9 +62,11 @@ def getFilesToScan(rootDir : str, extension : str) -> list:
     return filterFilesByExtension(candidateFiles, extension)
 
 def getAllFilesInDirHierarchy(rootDir : str) -> list : #RETURN RELATIVE_PATH OF ALL FILES IN FOLDER HYERARCHY
+    skipped_files=["vt_api_key.txt"]
     files_list = []
     for root, dirs, files in os.walk(rootDir):
         for file in files:
+            if file in skipped_files : continue     #We dont want to accidentally upload our api key
             full_path = os.path.join(root, file)
             files_list.append(full_path)
     return files_list
