@@ -21,8 +21,8 @@ path_and_link_to_requested_analysis_queue = Queue()
 
 #Program data
 __author__="Antonio M-B | antoniomarinb@github.com"
-__program_name__="vt-bulk.0.3"
-__version__ = "0.3"
+__program_name__="vt-bulk.0.3.1"
+__version__ = "0.3.1"
 __maintainer__="Antonio M-B"
 __status__=" 0.3 Development"
 __ascii_art__= r'''
@@ -35,6 +35,14 @@ __ascii_art__= r'''
    \  $/      | $$        | $$$$$$$/|  $$$$$$/| $$$$$$$$| $$ \  $$      
     \_/       |__/        |_______/  \______/ |________/|__/  \__/      
 '''
+
+'''--------------------- OVERRIDES -------------------------------------'''
+
+def input2(sentence = ""):
+    res=input(sentence)
+    if res.lower() == "exit":
+        exit(0)
+    else: return res
 
 '''--------------------- FILE CANDIDATE SELECTION ----------------------'''
 
@@ -94,7 +102,7 @@ def getQueuedScansResultsV2():
 
 def multithread_GetFileResults(file_path : str):
     global headers
-    response=requests.get(f"https://www.virustotal.com/api/v3/files/{HashFileMD5(file_path)}",headers=headers)
+    response=requests.get(f"https://www.virustotal.com/api/v3/files/{getFileHash(file_path,"SHA256")}",headers=headers)
 
     if response.status_code == 200:
         if VERBOSE: print(f"File {os.path.basename(file_path)} retrieved successfully")
@@ -208,7 +216,7 @@ def getUserVerification(files: list):
 
     # ASK USER FOR FINAL VERIFICATION
     while (1):
-        userVerification = input("\nWant to proceed? (yes/no) \n").lower()
+        userVerification = input2("\nWant to proceed? (yes/no) \n").lower()
         if (userVerification == "no" or userVerification == "n"):
             exit(1)
         elif (userVerification == "yes" or userVerification == "y"):
@@ -263,34 +271,17 @@ def argumentHandler():
     if DIRECTORY_PATH == None:
         exit("Aborted: file path cant be None")
 
-def HashFileMD5(file: str) -> str:
-    # Source - https://stackoverflow.com/questions/22058048/hashing-a-file-in-python
-    # Posted by Randall Hunt
-    # Retrieved 2025-12-28, License - CC BY-SA 4.0
-    # BUF_SIZE is totally arbitrary, change for your app!
-    BUF_SIZE = 65536  # lets read stuff in 64kb chunks!
-
-    md5 = hashlib.md5()
-
-    with open(file, 'rb') as f:
-        while True:
-            data = f.read(BUF_SIZE)
-            if not data:
-                break
-            md5.update(data)
-    return md5.hexdigest()
-
 def LaunchSimpleTUI():
     global NO_JSON_DUMP
-    DIRECTORY_PATH = input("Choose directory to fetch files from (if blank, will choose the current dir): ")
+    DIRECTORY_PATH = input2("Choose directory to fetch files from (if blank, will choose the current dir): ")
     if(DIRECTORY_PATH == ""):
         DIRECTORY_PATH = os.getcwd()
     print("Extensions to scan (leave blank to scan every extension)")
     print("F.E: .dll, .exe")
-    extension = input()
+    extension = input2()
 
     while(1):
-        user_wants_dumps=input("Do you want the results dumped into .json files? (y/n) :")
+        user_wants_dumps=input2("Do you want the results dumped into .json files? (y/n) :")
         if(user_wants_dumps[0].lower() == "y"): NO_JSON_DUMP=False; break
         elif(user_wants_dumps[0].lower() == "n"): NO_JSON_DUMP=True; break
 
@@ -303,9 +294,9 @@ def APIHelper():
     client_api_key = ""
     print("Seems like you dont have an vt_api_key.txt file, let me help you with that")
     while(vt_user_id==""):
-        vt_user_id = input("Enter your Virus total user id (Virus Total -> Profile) : ")
+        vt_user_id = input2("Enter your Virus total user id (Virus Total -> Profile) : ")
     while(len(client_api_key)!=64):
-        client_api_key=input(f"Paste your Virus Total API key (https://www.virustotal.com/gui/user/{vt_user_id}/apikey) : ")
+        client_api_key=input2(f"Paste your Virus Total API key (https://www.virustotal.com/gui/user/{vt_user_id}/apikey) : ")
         if(len(client_api_key)!=64): print("Invalid API key")
     with open("vt_api_key.txt","w") as api_key_file:
         api_key_file.write(f"{client_api_key}:{vt_user_id}")
@@ -332,7 +323,7 @@ def createAnalysisFile(jsondump : dict, file_path : str):
         return
     if not os.path.exists("./scans"):
         os.makedirs("./scans")
-    with open(f"./scans/{os.path.basename(file_path)}-{HashFileMD5(file_path)}.analysis.json", "w", encoding="utf-8") as json_file:
+    with open(f"./scans/{os.path.basename(file_path)}-{getFileHash(file_path,"SHA256")}.analysis.json", "w", encoding="utf-8") as json_file:
         json.dump(jsondump, json_file, indent=4)
 
 def printSummarizedReport2(results : dict):
@@ -340,6 +331,30 @@ def printSummarizedReport2(results : dict):
     print(f"Registered names: {results["names"]}")
     if VERBOSE: print(f"Link: {results["link"]}")
     print(f"Results: {results["summary"]}")
+
+def getFileHash(file_path : str, algorithm : str):
+    algorithm=algorithm.upper()
+    DEFAULT_ALGORITHM = "SHA256"
+
+    if algorithm == "SHA512":
+        chosen_algorithm=hashlib.sha512()
+    elif algorithm == "MD5":
+        chosen_algorithm=hashlib.md5()
+    elif algorithm == "SHA256":
+        chosen_algorithm=hashlib.sha256()
+    else:
+        if VERBOSE: print(f"Algorithm {algorithm} not available, using {DEFAULT_ALGORITHM}")
+        chosen_algorithm=DEFAULT_ALGORITHM
+
+    BUF_SIZE=65536
+
+    with open(file_path, 'rb') as file:
+        while True:
+            data = file.read(BUF_SIZE)
+            if not data:
+                break
+            chosen_algorithm.update(data)
+        return chosen_algorithm.hexdigest()
 
 
 '''--------------------- MAIN ----------------------------------------'''
