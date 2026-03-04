@@ -28,6 +28,6 @@ CURRENT PROGRAM FUNCTIONALITY:
 
 TODO:
   - Fix terminal arguments
-  - Reduce the amount of API usage by not requesting recently scanned files.
+  - Warn user about weak hashing protocols and its implications (more collisions, result fetched may not correspond with file uploaded)
   - Bulk scan URLs
   - UI in a far future.
