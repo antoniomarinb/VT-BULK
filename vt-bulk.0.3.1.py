@@ -4,6 +4,7 @@ from queue import Queue
 #Constants
 API_SCAN_REQUESTS_PER_MINUTE=4
 QUEUE_RETRY_DELAY=2
+#TODO
 PROGRAM_USAGE_STR="python vt-sbs.py [ | -e {extensions} | -u | --unsafe-only | -f | --full-report (NOT IMPLEMENTED)] PATH_TO_DIR"
 
 #Environment variables
@@ -11,13 +12,11 @@ VERBOSE = True
 NO_JSON_DUMP=False
 CHECK_QUOTA=True
 
-
 #Runtime global variables
 finished_requesting_scans=False
 analysis_results_queue = Queue()
 files_need_scanning_queue = Queue()
 path_and_link_to_requested_analysis_queue = Queue()
-
 
 #Program data
 __author__="Antonio M-B | antoniomarinb@github.com"
@@ -191,7 +190,7 @@ def requestedAnalysisWorker():  #Async queue manager for files sent to VT
 
             if response.status_code == 200:
                 path_and_link_to_requested_analysis_queue.put((file_path, response.json()['data']['links']['self']))
-            else: print(f"Error has ocurred while attempting to send file {file_path} to Virus-Total")
+            else: print(f"Error has ocurred while attempting to send file {file_path} to Virus-Total: CODE {response.status_code} \n\t{response.text}")
         else:
             time.sleep(0.1)
 
