@@ -10,6 +10,8 @@ except ImportError:
     print("Dependencies installed! Re-running program. ")
     os.execl(sys.executable, sys.executable, *sys.argv)
 
+
+
 #Constants
 API_SCAN_REQUESTS_PER_MINUTE=4
 QUEUE_RETRY_DELAY=2
@@ -29,7 +31,7 @@ path_and_link_to_requested_analysis_queue = Queue()
 
 #Program data
 __author__="Antonio M-B | antoniomarinb@github.com"
-__program_name__="vt-bulk.0.3.1"
+__program_name__="vt-bulk.0.3.3.py"
 __version__ = "0.3.3"
 __maintainer__="Antonio M-B"
 __status__=" 0.3 Development"
@@ -60,9 +62,11 @@ def getFilesToScan(rootDir : str, extension : str) -> list:
     return filterFilesByExtension(candidateFiles, extension)
 
 def getAllFilesInDirHierarchy(rootDir : str) -> list : #RETURN RELATIVE_PATH OF ALL FILES IN FOLDER HYERARCHY
+    skipped_files=["vt_api_key.txt"]
     files_list = []
     for root, dirs, files in os.walk(rootDir):
         for file in files:
+            if file in skipped_files : continue     #We dont want to accidentally upload our api key
             full_path = os.path.join(root, file)
             files_list.append(full_path)
     return files_list
@@ -214,9 +218,9 @@ def getUserVerification(files: list):
     # SHOW FILES BY EXTENSION
     fileMap = {}
     print("The following files will be uploaded for verification: ")
-    for f in files:
-        extension = "." + f.split(".")[-1]
-        fileMap.setdefault(extension, []).append(f)
+    for file_path in files:
+        filename, extension = os.path.splitext(file_path)
+        fileMap.setdefault(extension, []).append(file_path)
     for key in fileMap.keys():
         print(key + ": ")
         for f in fileMap[key]:
@@ -229,8 +233,6 @@ def getUserVerification(files: list):
             exit(1)
         elif (userVerification == "yes" or userVerification == "y"):
             return
-        else:
-            print("Unvalid option")
 
 def argumentHandler():
     global DIRECTORY_PATH, extension
@@ -290,8 +292,9 @@ def LaunchSimpleTUI():
 
     while(1):
         user_wants_dumps=input2("Do you want the results dumped into .json files? (y/n) :")
-        if(user_wants_dumps[0].lower() == "y"): NO_JSON_DUMP=False; break
-        elif(user_wants_dumps[0].lower() == "n"): NO_JSON_DUMP=True; break
+        if len(user_wants_dumps) > 0:
+            if(user_wants_dumps[0].lower() == "y"): NO_JSON_DUMP=False; break
+            elif(user_wants_dumps[0].lower() == "n"): NO_JSON_DUMP=True; break
 
 
     return DIRECTORY_PATH, extension
