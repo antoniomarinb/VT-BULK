@@ -7,7 +7,8 @@ except ImportError:
     print("Dependencies not found: requests. Attempting to install...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--user" ,"requests"])
     import requests
-    print("Dependencies installed!")
+    print("Dependencies installed! Re-running program. ")
+    os.execl(sys.executable, sys.executable, *sys.argv)
 
 #Constants
 API_SCAN_REQUESTS_PER_MINUTE=4
@@ -29,7 +30,7 @@ path_and_link_to_requested_analysis_queue = Queue()
 #Program data
 __author__="Antonio M-B | antoniomarinb@github.com"
 __program_name__="vt-bulk.0.3.1"
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 __maintainer__="Antonio M-B"
 __status__=" 0.3 Development"
 __ascii_art__= r'''
