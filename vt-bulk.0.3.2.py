@@ -1,5 +1,13 @@
-import sys, hashlib, os, time, requests, json, datetime, threading
+import sys, hashlib, os, time, json, datetime, threading, subprocess
 from queue import Queue
+
+try:
+    import requests
+except ImportError:
+    print("Dependencies not found: requests. Attempting to install...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--user" ,"requests"])
+    import requests
+    print("Dependencies installed!")
 
 #Constants
 API_SCAN_REQUESTS_PER_MINUTE=4
@@ -21,7 +29,7 @@ path_and_link_to_requested_analysis_queue = Queue()
 #Program data
 __author__="Antonio M-B | antoniomarinb@github.com"
 __program_name__="vt-bulk.0.3.1"
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 __maintainer__="Antonio M-B"
 __status__=" 0.3 Development"
 __ascii_art__= r'''
