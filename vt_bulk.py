@@ -1,4 +1,4 @@
-import sys, hashlib, os, time, json, datetime, threading, subprocess
+import sys, hashlib, os, time, json, datetime, threading, subprocess, argparse
 from queue import Queue
 
 try:
@@ -14,9 +14,10 @@ except ImportError:
 
 #Constants
 API_SCAN_REQUESTS_PER_MINUTE=4
+API_REQUEST_TIMEOUT=10
 QUEUE_RETRY_DELAY=2
 #TODO
-PROGRAM_USAGE_STR="python vt-sbs.py [ | -e {extensions} | -u | --unsafe-only | -f | --full-report (NOT IMPLEMENTED)] PATH_TO_DIR"
+PROGRAM_USAGE_STR="python vt-bulk.0.3.3.py [-e {extensions}] [-q|--quiet] [-u|--unsafe-only] [-f|--full-report] PATH_TO_DIR"
 
 #Environment variables
 VERBOSE = True
@@ -51,7 +52,7 @@ __ascii_art__= r'''
 def input2(sentence = ""):
     res=input(sentence)
     if res.lower() == "exit":
-        exit(0)
+        sys.exit(0)
     else: return res
 
 '''--------------------- FILE CANDIDATE SELECTION ----------------------'''
@@ -94,7 +95,7 @@ def getQueuedScansResultsV2():
         pair = path_and_link_to_requested_analysis_queue.get()
         file_path=pair[0]; link=pair[1]
 
-        try: response = requests.get(link, headers=headers)
+        try: response = requests.get(link, headers=headers, timeout=API_REQUEST_TIMEOUT)
         except Exception as e: print(e); return None
 
         if(response.json()['data']['attributes']['status'] == "completed"):
@@ -114,7 +115,7 @@ def getQueuedScansResultsV2():
 
 def multithread_GetFileResults(file_path : str):
     global headers
-    response=requests.get(f"https://www.virustotal.com/api/v3/files/{getFileHash(file_path,"SHA256")}",headers=headers)
+    response=requests.get(f"https://www.virustotal.com/api/v3/files/{getFileHash(file_path,"SHA256")}",headers=headers, timeout=API_REQUEST_TIMEOUT)
 
     if response.status_code == 200:
         if VERBOSE: print(f"File {os.path.basename(file_path)} retrieved successfully")
@@ -190,20 +191,22 @@ def requestedAnalysisWorker():  #Async queue manager for files sent to VT
     while not finished_requesting_scans or not files_need_scanning_queue.empty():
         if not files_need_scanning_queue.empty():
             file_path = files_need_scanning_queue.get()
+            response = None
             try:
                 with open(file_path, "rb") as f:
 
                     rateLimiter.request()
-                    response = requests.post("https://www.virustotal.com/api/v3/files", files={"file": f},headers=headers)
+                    response = requests.post("https://www.virustotal.com/api/v3/files", files={"file": f},headers=headers, timeout=API_REQUEST_TIMEOUT)
                     rateLimiter.place()
 
             except Exception as e:
                 print(f"Could not open or send file {file_path}")
                 print(e)
 
-            if response.status_code == 200:
+            if response is not None and response.status_code == 200:
                 path_and_link_to_requested_analysis_queue.put((file_path, response.json()['data']['links']['self']))
-            else: print(f"Error has ocurred while attempting to send file {file_path} to Virus-Total: CODE {response.status_code} \n\t{response.text}")
+            elif response is not None:
+                print(f"Error has ocurred while attempting to send file {file_path} to Virus-Total: CODE {response.status_code} \n\t{response.text}")
         else:
             time.sleep(0.1)
 
@@ -235,51 +238,32 @@ def getUserVerification(files: list):
             return
 
 def argumentHandler():
-    global DIRECTORY_PATH, extension
-    DIRECTORY_PATH = None
-    extension = None
+    global DIRECTORY_PATH, extension, VERBOSE
 
-    sys.argv.pop(0)  # Pop scripts name
+    parser = argparse.ArgumentParser(description="VirusTotal Simple Bulk Scanner")
+    parser.add_argument("path", nargs="?", default=None, help="Directory to scan")
+    parser.add_argument("-e", "--extension", default=None, help="Comma-separated extensions (e.g. .exe,.dll)")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress verbose output")
+    parser.add_argument("-u", "--unsafe-only", action="store_true", help="Only show unsafe files (not implemented)")
+    parser.add_argument("-f", "--full-report", action="store_true", help="Show full report (not implemented)")
 
-    if (sys.argv.__len__() == 0):
+    args = parser.parse_args()
+
+    if args.quiet:
+        VERBOSE = False
+
+    if args.unsafe_only:
+        print("Warning: -u/--unsafe-only is not yet implemented, ignoring")
+    if args.full_report:
+        print("Warning: -f/--full-report is not yet implemented, ignoring")
+
+    if args.path is None:
         DIRECTORY_PATH, extension = LaunchSimpleTUI()
-        return
-
-    while (sys.argv.__len__() != 0):
-        argument = sys.argv[0]
-
-        # Is modifier?
-        if argument.startswith("-") or argument.startswith("--"):
-
-            if argument == "-e" or argument == "--extension":
-
-                if (sys.argv.__len__() < 2):
-                    exit("Argument -e must be followed by an extension, for example: -e .exe")
-
-                extension = sys.argv[1]
-                sys.argv.pop(0)
-
-            elif argument == "-u" or argument == "--unsafe-only":
-                only_print_unsafe = True
-            elif argument == "-f" or argument == "--full-report":
-                full_report = True
-            else:
-                exit("Invalid argument, : " + argument)
-
-            sys.argv.pop(0)
-
-        # If is not modifier, it is folder path
-        else:
-            DIRECTORY_PATH = sys.argv[0]
-            if not os.path.isdir(DIRECTORY_PATH):
-                exit("Invalid directory path: " + argument)
-
-            # if DIRECTORY_PATH.endswith("/"):            # python vt-sbs myDir/ -> myDir
-            # DIRECTORY_PATH=DIRECTORY_PATH[:-1]
-
-            sys.argv.pop(0)
-    if DIRECTORY_PATH == None:
-        exit("Aborted: file path cant be None")
+    else:
+        if not os.path.isdir(args.path):
+            exit("Invalid directory path: " + args.path)
+        DIRECTORY_PATH = args.path
+        extension = args.extension
 
 def LaunchSimpleTUI():
     global NO_JSON_DUMP
@@ -311,12 +295,11 @@ def APIHelper():
         if(len(client_api_key)!=64): print("Invalid API key")
     with open("vt_api_key.txt","w") as api_key_file:
         api_key_file.write(f"{client_api_key}:{vt_user_id}")
-        api_key_file.close()
     print("All set!, resuming")
 
 def printAndSaveDailyAPIQuotaStats():
     global headers
-    response = requests.get(f"https://www.virustotal.com/api/v3/users/{vt_user_id}/api_usage", headers=headers)
+    response = requests.get(f"https://www.virustotal.com/api/v3/users/{vt_user_id}/api_usage", headers=headers, timeout=API_REQUEST_TIMEOUT)
     response_json=response.json()
     if response.status_code==200:
         print("Daily API Quota Stats: ")
@@ -355,7 +338,7 @@ def getFileHash(file_path : str, algorithm : str):
         chosen_algorithm=hashlib.sha256()
     else:
         if VERBOSE: print(f"Algorithm {algorithm} not available, using {DEFAULT_ALGORITHM}")
-        chosen_algorithm=DEFAULT_ALGORITHM
+        chosen_algorithm=hashlib.sha256()
 
     BUF_SIZE=65536
 
@@ -373,10 +356,12 @@ def getFileHash(file_path : str, algorithm : str):
 if __name__ == '__main__':
 
     try:
-        api_and_user_string = open("vt_api_key.txt", "r").read()
+        with open("vt_api_key.txt", "r") as f:
+            api_and_user_string = f.read()
     except FileNotFoundError:
         APIHelper()
-        api_and_user_string = open("vt_api_key.txt", "r").read()
+        with open("vt_api_key.txt", "r") as f:
+            api_and_user_string = f.read()
 
     client_api_key = api_and_user_string.split(":")[0]
     vt_user_id = api_and_user_string.split(":")[1]
