@@ -258,18 +258,33 @@ def argumentHandler():
         print("Warning: -f/--full-report is not yet implemented, ignoring")
 
     if args.path is None:
-        DIRECTORY_PATH, extension = LaunchSimpleTUI()
+            DIRECTORY_PATH, extension = LaunchSimpleTUI()
     else:
-        if not os.path.isdir(args.path):
-            exit("Invalid directory path: " + args.path)
         DIRECTORY_PATH = args.path
+        if not os.path.isdir(DIRECTORY_PATH):
+                    exit("Invalid directory path: " + args.path)
         extension = args.extension
 
 def LaunchSimpleTUI():
     global NO_JSON_DUMP
-    DIRECTORY_PATH = input2("Choose directory to fetch files from (if blank, will choose the current dir): ")
-    if(DIRECTORY_PATH == ""):
-        DIRECTORY_PATH = os.getcwd()
+
+    #DIRECTORY
+
+    while True:
+        DIRECTORY_PATH = input2("Choose directory to fetch files from (if blank, will choose the current dir): ")
+
+        #Get current working directory if left blank
+        if(DIRECTORY_PATH == ""):
+            DIRECTORY_PATH = os.getcwd()
+
+        #Check path exists
+        if (os.path.isdir(DIRECTORY_PATH)):
+            break
+        else:
+            print("ERROR: Directory \""+DIRECTORY_PATH+ "\" not found")
+
+    #EXTENSIONS
+
     print("Extensions to scan (leave blank to scan every extension)")
     print("F.E: .dll, .exe")
     extension = input2()
