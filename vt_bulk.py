@@ -13,7 +13,11 @@ except ImportError:
 
 
 #Constants
+
+#API MINUTELY TIMERS. ej: 4 requests per minute 
 API_SCAN_REQUESTS_PER_MINUTE=4
+API_MINUTELY_QUOTA_TIMER = 60
+
 API_REQUEST_TIMEOUT=10
 QUEUE_RETRY_DELAY=2
 #TODO
@@ -169,6 +173,7 @@ def multithread_launchProgram(file_list : list) -> None:
 
 '''--------------------- WORKERS --------------------------------------'''
 class APIRateLimiter:
+
     def __init__(self, analysis_requests_per_minute):
         self.rpm = int(analysis_requests_per_minute)
         self.queue = Queue()
@@ -177,9 +182,9 @@ class APIRateLimiter:
         if self.queue.qsize() >= self.rpm:
             oldest_request_time = self.queue.get()
             time_delta = time.time() - oldest_request_time
-            if time_delta <= 60:
-                if VERBOSE: print(f"API minutely upload minute reached, thread sleeping for: {60-time_delta}s.")
-                time.sleep(60-time_delta) #Sleep for time remaining for last request decay
+            if time_delta <= API_MINUTELY_QUOTA_TIMER:
+                if VERBOSE: print(f"API minutely upload minute reached, thread sleeping for: {API_MINUTELY_QUOTA_TIMER-time_delta}s.")
+                time.sleep(API_MINUTELY_QUOTA_TIMER-time_delta) #Sleep for time remaining for last request decay
 
     def place(self):
             self.queue.put(time.time())
@@ -299,15 +304,18 @@ def LaunchSimpleTUI():
     return DIRECTORY_PATH, extension
 
 def APIHelper():
+
+    API_KEY_LENGTH = 64
+
     global client_api_key,vt_user_id
     vt_user_id = ""
     client_api_key = ""
     print("Seems like you dont have an vt_api_key.txt file, let me help you with that")
     while(vt_user_id==""):
         vt_user_id = input2("Enter your Virus total user id (Virus Total -> Profile) : ")
-    while(len(client_api_key)!=64):
+    while(len(client_api_key)!=API_KEY_LENGTH):
         client_api_key=input2(f"Paste your Virus Total API key (https://www.virustotal.com/gui/user/{vt_user_id}/apikey) : ")
-        if(len(client_api_key)!=64): print("Invalid API key")
+        if(len(client_api_key)!=API_KEY_LENGTH): print("Invalid API key")
     with open("vt_api_key.txt","w") as api_key_file:
         api_key_file.write(f"{client_api_key}:{vt_user_id}")
     print("All set!, resuming")
