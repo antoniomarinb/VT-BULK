@@ -35,14 +35,14 @@ When auditing large software directories, downloaded artifacts, or suspicious fi
 
 ## ✨ Key Capabilities
 
-- 🚀 **Hash-First Query Engine**: Calculates local cryptographic hashes (SHA-256) and probes VirusTotal's cache first. Files already cataloged are diagnosed in milliseconds without consuming upload bandwidth.
+- 🚀 **Hash-First Query Engine**: Calculates local cryptographic hashes (SHA-256) and probes VirusTotal's cache first. Files already cataloged are diagnosed without consuming upload bandwidth.
 - 🧵 **Multi-Threaded Parallel Lookups**: Spawns concurrent worker threads across the target directory, accelerating batch triage significantly.
-- ⏱️ **Smart API Rate Limiting**: Built-in sliding-window limiter (`APIRateLimiter`) strictly respects the free-tier quota (4 uploads/minute), avoiding HTTP 429 quota exhaustion.
+- ⏱️ **Smart API Rate Limiting**: Built-in sliding-window limiter (`APIRateLimiter`) strictly respects the quota limits (4 uploads/minute by default), avoiding HTTP 429 quota exhaustion.
 - 🔄 **Asynchronous Analysis Polling**: Files requiring fresh analysis are uploaded in the background while an asynchronous loop polls their completion status.
 - 📂 **Recursive Tree Traversal**: Scans arbitrary folder hierarchies with flexible file extension filtering (e.g., `.exe`, `.dll`, `.bin`).
 - 🛡️ **Safe & Transparent Operation**: Displays a classified breakdown of all candidate files and prompts for user confirmation before initiating any remote network requests. Sensitive files (such as `vt_api_key.txt`) are automatically protected.
 - 💾 **Structured Data Persistence**: Saves complete VirusTotal v3 JSON reports to `./scans/<filename>-<hash>.analysis.json` and records daily API quota metrics in `quota_stats.json`.
-- 🖥️ **Dual Execution Modes**: Seamlessly switch between an interactive step-by-step TUI wizard and headless CLI arguments suitable for scripts and pipelines.
+- 🖥️ **Dual Execution Modes**: Interactive step-by-step TUI wizard and headless CLI arguments suitable for scripts and pipelines.
 
 ---
 
