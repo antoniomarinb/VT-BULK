@@ -1,4 +1,4 @@
-import sys, hashlib, os, time, json, datetime, threading, subprocess
+import sys, hashlib, os, time, json, datetime, threading, subprocess, argparse
 from queue import Queue
 
 try:
@@ -13,10 +13,15 @@ except ImportError:
 
 
 #Constants
+
+#API MINUTELY TIMERS. ej: 4 requests per minute 
 API_SCAN_REQUESTS_PER_MINUTE=4
+API_MINUTELY_QUOTA_TIMER = 60 #Set to 0 if case of professional license
+
+API_REQUEST_TIMEOUT=10
 QUEUE_RETRY_DELAY=2
 #TODO
-PROGRAM_USAGE_STR="python vt-sbs.py [ | -e {extensions} | -u | --unsafe-only | -f | --full-report (NOT IMPLEMENTED)] PATH_TO_DIR"
+PROGRAM_USAGE_STR="python vt-bulk.0.3.3.py [-e {extensions}] [-q|--quiet] [-u|--unsafe-only] [-f|--full-report] PATH_TO_DIR"
 
 #Environment variables
 VERBOSE = True
@@ -51,7 +56,7 @@ __ascii_art__= r'''
 def input2(sentence = ""):
     res=input(sentence)
     if res.lower() == "exit":
-        exit(0)
+        sys.exit(0)
     else: return res
 
 '''--------------------- FILE CANDIDATE SELECTION ----------------------'''
@@ -94,7 +99,7 @@ def getQueuedScansResultsV2():
         pair = path_and_link_to_requested_analysis_queue.get()
         file_path=pair[0]; link=pair[1]
 
-        try: response = requests.get(link, headers=headers)
+        try: response = requests.get(link, headers=headers, timeout=API_REQUEST_TIMEOUT)
         except Exception as e: print(e); return None
 
         if(response.json()['data']['attributes']['status'] == "completed"):
@@ -114,10 +119,10 @@ def getQueuedScansResultsV2():
 
 def multithread_GetFileResults(file_path : str):
     global headers
-    response=requests.get(f"https://www.virustotal.com/api/v3/files/{getFileHash(file_path,"SHA256")}",headers=headers)
+    response=requests.get(f"https://www.virustotal.com/api/v3/files/{getFileHash(file_path,"SHA256")}",headers=headers, timeout=API_REQUEST_TIMEOUT)
 
     if response.status_code == 200:
-        if VERBOSE: print(f"File {os.path.basename(file_path)} retrieved successfully")
+        if VERBOSE: print(f"File {Color.BLUE}{os.path.basename(file_path)}{Color.RESET} retrieved successfully")
         jsondump = response.json()
         analysis_results_queue.put({"file_path" : file_path, "names" : jsondump["data"]["attributes"]["names"], "link": jsondump['data']['links']["self"], "summary" : jsondump["data"]["attributes"]["last_analysis_stats"]  })
         createAnalysisFile(jsondump, file_path)
@@ -161,13 +166,14 @@ def multithread_launchProgram(file_list : list) -> None:
         elif result["summary"]["suspicious"]!=0: batch_results["suspicious_files"].append(os.path.basename(result["file_path"]))
         else: batch_results["undetected_files"].append(os.path.basename(result["file_path"]))
 
-    print("\nTotal results: ")
-    print("\tMalicious: " + str(batch_results["malicious_files"]))
-    print("\tSuspicious: " + str(batch_results["suspicious_files"]))
-    print("\tUndetected: " + str(batch_results["undetected_files"])+"\n")
+    print(f"\n{Color.BOLD}{Color.UNDERLINE}Total results:{Color.RESET}")
+    print(f"\t {Color.RED} Malicious: {Color.RESET}" + str(batch_results["malicious_files"]))
+    print(f"\t {Color.YELLOW} Suspicious: {Color.RESET}" + str(batch_results["suspicious_files"]))
+    print(f"\t {Color.GREEN} Undetected: {Color.RESET}" + str(batch_results["undetected_files"])+"\n")
 
 '''--------------------- WORKERS --------------------------------------'''
 class APIRateLimiter:
+
     def __init__(self, analysis_requests_per_minute):
         self.rpm = int(analysis_requests_per_minute)
         self.queue = Queue()
@@ -176,9 +182,9 @@ class APIRateLimiter:
         if self.queue.qsize() >= self.rpm:
             oldest_request_time = self.queue.get()
             time_delta = time.time() - oldest_request_time
-            if time_delta <= 60:
-                if VERBOSE: print(f"API minutely upload minute reached, thread sleeping for: {60-time_delta}s.")
-                time.sleep(60-time_delta) #Sleep for time remaining for last request decay
+            if time_delta <= API_MINUTELY_QUOTA_TIMER:
+                if VERBOSE: print(f"API minutely upload minute reached, thread sleeping for: {API_MINUTELY_QUOTA_TIMER-time_delta}s.")
+                time.sleep(API_MINUTELY_QUOTA_TIMER-time_delta) #Sleep for time remaining for last request decay
 
     def place(self):
             self.queue.put(time.time())
@@ -190,20 +196,22 @@ def requestedAnalysisWorker():  #Async queue manager for files sent to VT
     while not finished_requesting_scans or not files_need_scanning_queue.empty():
         if not files_need_scanning_queue.empty():
             file_path = files_need_scanning_queue.get()
+            response = None
             try:
                 with open(file_path, "rb") as f:
 
                     rateLimiter.request()
-                    response = requests.post("https://www.virustotal.com/api/v3/files", files={"file": f},headers=headers)
+                    response = requests.post("https://www.virustotal.com/api/v3/files", files={"file": f},headers=headers, timeout=API_REQUEST_TIMEOUT)
                     rateLimiter.place()
 
             except Exception as e:
                 print(f"Could not open or send file {file_path}")
                 print(e)
 
-            if response.status_code == 200:
+            if response is not None and response.status_code == 200:
                 path_and_link_to_requested_analysis_queue.put((file_path, response.json()['data']['links']['self']))
-            else: print(f"Error has ocurred while attempting to send file {file_path} to Virus-Total: CODE {response.status_code} \n\t{response.text}")
+            elif response is not None:
+                print(f"Error has ocurred while attempting to send file {file_path} to Virus-Total: CODE {response.status_code} \n\t{response.text}")
         else:
             time.sleep(0.1)
 
@@ -228,64 +236,60 @@ def getUserVerification(files: list):
 
     # ASK USER FOR FINAL VERIFICATION
     while (1):
-        userVerification = input2("\nWant to proceed? (yes/no) \n").lower()
+        userVerification = input2("\nWant to proceed? (yes/no): ").lower()
         if (userVerification == "no" or userVerification == "n"):
             exit(1)
         elif (userVerification == "yes" or userVerification == "y"):
             return
 
 def argumentHandler():
-    global DIRECTORY_PATH, extension
-    DIRECTORY_PATH = None
-    extension = None
+    global DIRECTORY_PATH, extension, VERBOSE
 
-    sys.argv.pop(0)  # Pop scripts name
+    parser = argparse.ArgumentParser(description="VirusTotal Simple Bulk Scanner")
+    parser.add_argument("path", nargs="?", default=None, help="Directory to scan")
+    parser.add_argument("-e", "--extension", default=None, help="Comma-separated extensions (e.g. .exe,.dll)")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress verbose output")
+    parser.add_argument("-u", "--unsafe-only", action="store_true", help="Only show unsafe files (not implemented)")
+    parser.add_argument("-f", "--full-report", action="store_true", help="Show full report (not implemented)")
 
-    if (sys.argv.__len__() == 0):
-        DIRECTORY_PATH, extension = LaunchSimpleTUI()
-        return
+    args = parser.parse_args()
 
-    while (sys.argv.__len__() != 0):
-        argument = sys.argv[0]
+    if args.quiet:
+        VERBOSE = False
 
-        # Is modifier?
-        if argument.startswith("-") or argument.startswith("--"):
+    if args.unsafe_only:
+        print("Warning: -u/--unsafe-only is not yet implemented, ignoring")
+    if args.full_report:
+        print("Warning: -f/--full-report is not yet implemented, ignoring")
 
-            if argument == "-e" or argument == "--extension":
-
-                if (sys.argv.__len__() < 2):
-                    exit("Argument -e must be followed by an extension, for example: -e .exe")
-
-                extension = sys.argv[1]
-                sys.argv.pop(0)
-
-            elif argument == "-u" or argument == "--unsafe-only":
-                only_print_unsafe = True
-            elif argument == "-f" or argument == "--full-report":
-                full_report = True
-            else:
-                exit("Invalid argument, : " + argument)
-
-            sys.argv.pop(0)
-
-        # If is not modifier, it is folder path
-        else:
-            DIRECTORY_PATH = sys.argv[0]
-            if not os.path.isdir(DIRECTORY_PATH):
-                exit("Invalid directory path: " + argument)
-
-            # if DIRECTORY_PATH.endswith("/"):            # python vt-sbs myDir/ -> myDir
-            # DIRECTORY_PATH=DIRECTORY_PATH[:-1]
-
-            sys.argv.pop(0)
-    if DIRECTORY_PATH == None:
-        exit("Aborted: file path cant be None")
+    if args.path is None:
+            DIRECTORY_PATH, extension = LaunchSimpleTUI()
+    else:
+        DIRECTORY_PATH = args.path
+        if not os.path.isdir(DIRECTORY_PATH):
+                    exit("Invalid directory path: " + args.path)
+        extension = args.extension
 
 def LaunchSimpleTUI():
     global NO_JSON_DUMP
-    DIRECTORY_PATH = input2("Choose directory to fetch files from (if blank, will choose the current dir): ")
-    if(DIRECTORY_PATH == ""):
-        DIRECTORY_PATH = os.getcwd()
+
+    #DIRECTORY
+
+    while True:
+        DIRECTORY_PATH = input2("Choose directory to fetch files from (if blank, will choose the current dir): ")
+
+        #Get current working directory if left blank
+        if(DIRECTORY_PATH == ""):
+            DIRECTORY_PATH = os.getcwd()
+
+        #Check path exists
+        if (os.path.isdir(DIRECTORY_PATH)):
+            break
+        else:
+            print("ERROR: Directory \""+DIRECTORY_PATH+ "\" not found")
+
+    #EXTENSIONS
+
     print("Extensions to scan (leave blank to scan every extension)")
     print("F.E: .dll, .exe")
     extension = input2()
@@ -300,26 +304,28 @@ def LaunchSimpleTUI():
     return DIRECTORY_PATH, extension
 
 def APIHelper():
+
+    API_KEY_LENGTH = 64
+
     global client_api_key,vt_user_id
     vt_user_id = ""
     client_api_key = ""
     print("Seems like you dont have an vt_api_key.txt file, let me help you with that")
     while(vt_user_id==""):
         vt_user_id = input2("Enter your Virus total user id (Virus Total -> Profile) : ")
-    while(len(client_api_key)!=64):
+    while(len(client_api_key)!=API_KEY_LENGTH):
         client_api_key=input2(f"Paste your Virus Total API key (https://www.virustotal.com/gui/user/{vt_user_id}/apikey) : ")
-        if(len(client_api_key)!=64): print("Invalid API key")
+        if(len(client_api_key)!=API_KEY_LENGTH): print("Invalid API key")
     with open("vt_api_key.txt","w") as api_key_file:
         api_key_file.write(f"{client_api_key}:{vt_user_id}")
-        api_key_file.close()
     print("All set!, resuming")
 
 def printAndSaveDailyAPIQuotaStats():
     global headers
-    response = requests.get(f"https://www.virustotal.com/api/v3/users/{vt_user_id}/api_usage", headers=headers)
+    response = requests.get(f"https://www.virustotal.com/api/v3/users/{vt_user_id}/api_usage", headers=headers, timeout=API_REQUEST_TIMEOUT)
     response_json=response.json()
     if response.status_code==200:
-        print("Daily API Quota Stats: ")
+        print(f"{Color.BOLD}{Color.UNDERLINE}Daily API Quota Stats:{Color.RESET}")
         print("\t"+str(response_json["data"]["daily"][datetime.datetime.today().strftime('%Y-%m-%d')]))
         if(not NO_JSON_DUMP):
             with open(f"quota_stats.json", "w", encoding="utf-8") as json_file:
@@ -338,10 +344,10 @@ def createAnalysisFile(jsondump : dict, file_path : str):
         json.dump(jsondump, json_file, indent=4)
 
 def printSummarizedReport2(results : dict):
-    print("\n"+results["file_path"]+": ")
-    print(f"Registered names: {results["names"]}")
-    if VERBOSE: print(f"Link: {results["link"]}")
-    print(f"Results: {results["summary"]}")
+    print(f"\n {Color.BOLD} {results["file_path"]} : {Color.RESET}")
+    print(f"{Color.ORANGE} Registered names: {Color.LIGHT_GRAY} {results["names"]} {Color.RESET}")
+    if VERBOSE: print(f"{Color.ORANGE} Link: {Color.RESET} {Color.UNDERLINE}{Color.CYAN}{results["link"]} {Color.RESET}")
+    print(f"{Color.ORANGE} Results: {Color.RESET} {Color.BLUE} {results["summary"]} {Color.RESET} ")
 
 def getFileHash(file_path : str, algorithm : str):
     algorithm=algorithm.upper()
@@ -355,7 +361,7 @@ def getFileHash(file_path : str, algorithm : str):
         chosen_algorithm=hashlib.sha256()
     else:
         if VERBOSE: print(f"Algorithm {algorithm} not available, using {DEFAULT_ALGORITHM}")
-        chosen_algorithm=DEFAULT_ALGORITHM
+        chosen_algorithm=hashlib.sha256()
 
     BUF_SIZE=65536
 
@@ -367,16 +373,44 @@ def getFileHash(file_path : str, algorithm : str):
             chosen_algorithm.update(data)
         return chosen_algorithm.hexdigest()
 
+'''--------------------- COLOR ---------------------------------------'''
+
+class Color: 
+    # Styles 
+    RESET = "\033[0m"                                                                                                                                                                                                                  
+    BOLD = "\033[1m"                                                                                                                                                                                                                   
+    DIM = "\033[2m"        
+    UNDERLINE = "\033[4m"                                                                                                                                                                                                            
+                                                                                                                                                                                                                                        
+    # Colors                                                                                                                                                                                                               
+    RED = "\033[91m"                # Malicious                                                                                                                                                                                          
+    GREEN = "\033[92m"              # Clean                                                                                                                                                                                      
+    YELLOW = "\033[93m"             # Suspicious/Warning                                                                                                                                                                                 
+    BLUE = "\033[94m"               # Info                                                                                                                                                                                                       
+    CYAN = "\033[96m"               # Links / Hashes                                                                                                                                                                                           
+    GRAY = "\033[90m"               # Not detected / Secondary  
+    LIGHT_GRAY = "\x1b[38;5;252m"
+    ORANGE = "\x1b[38;5;214m"                                                                                                                                                                   
+                                                                                                                                                                                                                                        
+    @classmethod                                                                                                                                                                                                                       
+    def disable(cls):                                                                                                                                                                                                                  
+        """Disable colors if output is redirected to file or pipe"""                                                                                                                                                   
+        for attr in dir(cls):                                                                                                                                                                                                          
+            if not attr.startswith("__") and isinstance(getattr(cls, attr), str):                                                                                                                                                      
+                setattr(cls, attr, "")     
+
 
 '''--------------------- MAIN ----------------------------------------'''
 
 if __name__ == '__main__':
 
     try:
-        api_and_user_string = open("vt_api_key.txt", "r").read()
+        with open("vt_api_key.txt", "r") as f:
+            api_and_user_string = f.read()
     except FileNotFoundError:
         APIHelper()
-        api_and_user_string = open("vt_api_key.txt", "r").read()
+        with open("vt_api_key.txt", "r") as f:
+            api_and_user_string = f.read()
 
     client_api_key = api_and_user_string.split(":")[0]
     vt_user_id = api_and_user_string.split(":")[1]
@@ -384,6 +418,10 @@ if __name__ == '__main__':
             "accept" : "application/json",
             "x-apikey" : client_api_key
         }
+
+    #Disable color if output is not a terminal
+    if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):                                                                                                                                                                              
+        Color.disable()  
 
     print(__ascii_art__)
     argumentHandler()
