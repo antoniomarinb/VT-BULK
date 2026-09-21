@@ -16,7 +16,7 @@ except ImportError:
 
 #API MINUTELY TIMERS. ej: 4 requests per minute 
 API_SCAN_REQUESTS_PER_MINUTE=4
-API_MINUTELY_QUOTA_TIMER = 60
+API_MINUTELY_QUOTA_TIMER = 60 #Set to 0 if case of professional license
 
 API_REQUEST_TIMEOUT=10
 QUEUE_RETRY_DELAY=2
@@ -122,7 +122,7 @@ def multithread_GetFileResults(file_path : str):
     response=requests.get(f"https://www.virustotal.com/api/v3/files/{getFileHash(file_path,"SHA256")}",headers=headers, timeout=API_REQUEST_TIMEOUT)
 
     if response.status_code == 200:
-        if VERBOSE: print(f"File {os.path.basename(file_path)} retrieved successfully")
+        if VERBOSE: print(f"File {Color.BLUE}{os.path.basename(file_path)}{Color.RESET} retrieved successfully")
         jsondump = response.json()
         analysis_results_queue.put({"file_path" : file_path, "names" : jsondump["data"]["attributes"]["names"], "link": jsondump['data']['links']["self"], "summary" : jsondump["data"]["attributes"]["last_analysis_stats"]  })
         createAnalysisFile(jsondump, file_path)
@@ -166,10 +166,10 @@ def multithread_launchProgram(file_list : list) -> None:
         elif result["summary"]["suspicious"]!=0: batch_results["suspicious_files"].append(os.path.basename(result["file_path"]))
         else: batch_results["undetected_files"].append(os.path.basename(result["file_path"]))
 
-    print("\nTotal results: ")
-    print("\tMalicious: " + str(batch_results["malicious_files"]))
-    print("\tSuspicious: " + str(batch_results["suspicious_files"]))
-    print("\tUndetected: " + str(batch_results["undetected_files"])+"\n")
+    print(f"\n{Color.BOLD}{Color.UNDERLINE}Total results:{Color.RESET}")
+    print(f"\t {Color.RED} Malicious: {Color.RESET}" + str(batch_results["malicious_files"]))
+    print(f"\t {Color.YELLOW} Suspicious: {Color.RESET}" + str(batch_results["suspicious_files"]))
+    print(f"\t {Color.GREEN} Undetected: {Color.RESET}" + str(batch_results["undetected_files"])+"\n")
 
 '''--------------------- WORKERS --------------------------------------'''
 class APIRateLimiter:
@@ -236,7 +236,7 @@ def getUserVerification(files: list):
 
     # ASK USER FOR FINAL VERIFICATION
     while (1):
-        userVerification = input2("\nWant to proceed? (yes/no) \n").lower()
+        userVerification = input2("\nWant to proceed? (yes/no): ").lower()
         if (userVerification == "no" or userVerification == "n"):
             exit(1)
         elif (userVerification == "yes" or userVerification == "y"):
@@ -325,7 +325,7 @@ def printAndSaveDailyAPIQuotaStats():
     response = requests.get(f"https://www.virustotal.com/api/v3/users/{vt_user_id}/api_usage", headers=headers, timeout=API_REQUEST_TIMEOUT)
     response_json=response.json()
     if response.status_code==200:
-        print("Daily API Quota Stats: ")
+        print(f"{Color.BOLD}{Color.UNDERLINE}Daily API Quota Stats:{Color.RESET}")
         print("\t"+str(response_json["data"]["daily"][datetime.datetime.today().strftime('%Y-%m-%d')]))
         if(not NO_JSON_DUMP):
             with open(f"quota_stats.json", "w", encoding="utf-8") as json_file:
@@ -344,10 +344,10 @@ def createAnalysisFile(jsondump : dict, file_path : str):
         json.dump(jsondump, json_file, indent=4)
 
 def printSummarizedReport2(results : dict):
-    print("\n"+results["file_path"]+": ")
-    print(f"Registered names: {results["names"]}")
-    if VERBOSE: print(f"Link: {results["link"]}")
-    print(f"Results: {results["summary"]}")
+    print(f"\n {Color.BOLD} {results["file_path"]} : {Color.RESET}")
+    print(f"{Color.ORANGE} Registered names: {Color.LIGHT_GRAY} {results["names"]} {Color.RESET}")
+    if VERBOSE: print(f"{Color.ORANGE} Link: {Color.RESET} {Color.UNDERLINE}{Color.CYAN}{results["link"]} {Color.RESET}")
+    print(f"{Color.ORANGE} Results: {Color.RESET} {Color.BLUE} {results["summary"]} {Color.RESET} ")
 
 def getFileHash(file_path : str, algorithm : str):
     algorithm=algorithm.upper()
@@ -373,6 +373,32 @@ def getFileHash(file_path : str, algorithm : str):
             chosen_algorithm.update(data)
         return chosen_algorithm.hexdigest()
 
+'''--------------------- COLOR ---------------------------------------'''
+
+class Color: 
+    # Styles 
+    RESET = "\033[0m"                                                                                                                                                                                                                  
+    BOLD = "\033[1m"                                                                                                                                                                                                                   
+    DIM = "\033[2m"        
+    UNDERLINE = "\033[4m"                                                                                                                                                                                                            
+                                                                                                                                                                                                                                        
+    # Colors                                                                                                                                                                                                               
+    RED = "\033[91m"                # Malicious                                                                                                                                                                                          
+    GREEN = "\033[92m"              # Clean                                                                                                                                                                                      
+    YELLOW = "\033[93m"             # Suspicious/Warning                                                                                                                                                                                 
+    BLUE = "\033[94m"               # Info                                                                                                                                                                                                       
+    CYAN = "\033[96m"               # Links / Hashes                                                                                                                                                                                           
+    GRAY = "\033[90m"               # Not detected / Secondary  
+    LIGHT_GRAY = "\x1b[38;5;252m"
+    ORANGE = "\x1b[38;5;214m"                                                                                                                                                                   
+                                                                                                                                                                                                                                        
+    @classmethod                                                                                                                                                                                                                       
+    def disable(cls):                                                                                                                                                                                                                  
+        """Disable colors if output is redirected to file or pipe"""                                                                                                                                                   
+        for attr in dir(cls):                                                                                                                                                                                                          
+            if not attr.startswith("__") and isinstance(getattr(cls, attr), str):                                                                                                                                                      
+                setattr(cls, attr, "")     
+
 
 '''--------------------- MAIN ----------------------------------------'''
 
@@ -392,6 +418,10 @@ if __name__ == '__main__':
             "accept" : "application/json",
             "x-apikey" : client_api_key
         }
+
+    #Disable color if output is not a terminal
+    if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):                                                                                                                                                                              
+        Color.disable()  
 
     print(__ascii_art__)
     argumentHandler()
